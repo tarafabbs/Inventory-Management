@@ -17,7 +17,7 @@ Add this redirect URI to the Google OAuth web client:
 
 When a custom domain is attached, add its host to `AUTH_ALLOWED_HOSTS` and add its callback URI to Google, for example:
 
-`https://inventory.example.com/api/auth/callback/google`
+`https://im.tarafabbs.com/api/auth/callback/google`
 
 Run `npm run db:migrate` against the Turso environment before the first production deployment. The first Google account to open an empty application database becomes the Admin; later staff must be added by exact Google email under Settings.
 

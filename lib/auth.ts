@@ -20,6 +20,7 @@ export const auth = betterAuth({
       "localhost:3000",
       "127.0.0.1:3000",
       "inventory-management-eight-ruby.vercel.app",
+      "im.tarafabbs.com",
       ...configuredHosts,
     ],
     protocol: process.env.NODE_ENV === "development" ? "http" : "https",

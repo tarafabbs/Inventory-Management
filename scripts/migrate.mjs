@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { createClient } from "@libsql/client";
 
-const client = createClient({ url: process.env.TURSO_DATABASE_URL ?? "file:local.db", authToken: process.env.TURSO_AUTH_TOKEN });
+const client = createClient({ url: process.env.TURSO_DATABASE_URL || "file:local.db", authToken: process.env.TURSO_AUTH_TOKEN || undefined });
 await client.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY NOT NULL, applied_at TEXT NOT NULL)");
 
 const files = (await readdir(new URL("../drizzle/", import.meta.url))).filter((name) => /^\d+.*\.sql$/.test(name)).sort();

@@ -2,8 +2,8 @@ import { createClient, type Client, type InStatement } from "@libsql/client";
 
 type BoundValue = string | number | bigint | ArrayBuffer | null;
 
-const url = process.env.TURSO_DATABASE_URL ?? "file:local.db";
-const authToken = process.env.TURSO_AUTH_TOKEN;
+const url = process.env.TURSO_DATABASE_URL || "file:local.db";
+const authToken = process.env.TURSO_AUTH_TOKEN || undefined;
 
 export const client = createClient({ url, authToken });
 
