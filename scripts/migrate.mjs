@@ -33,7 +33,7 @@ try {
     const [existingInventory] = await sql`
       select to_regclass('inventory.companies') as table_name
     `;
-    if (name === "20261024190000_inventory_schema.sql" && existingInventory.table_name) {
+    if (name === "20261024161403_inventory_schema.sql" && existingInventory.table_name) {
       await sql`insert into inventory._app_migrations (name) values (${name})`;
       continue;
     }

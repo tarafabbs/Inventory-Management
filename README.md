@@ -6,7 +6,7 @@ The inventory tables live in the dedicated `inventory` schema of the existing Ta
 
 ## Supabase configuration
 
-The schema migration is stored in `supabase/migrations/20261024190000_inventory_schema.sql`.
+The schema migrations are stored in `supabase/migrations`.
 
 Google sign-in is already in use on this Supabase project. Its Google Cloud authorized redirect URI remains:
 

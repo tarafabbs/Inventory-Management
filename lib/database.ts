@@ -34,7 +34,9 @@ function connection() {
   }
 
   client ??= postgres(url, {
-    max: 5,
+    max: 2,
+    idle_timeout: 20,
+    connect_timeout: 10,
     prepare: false,
     ssl: "require",
     connection: {
