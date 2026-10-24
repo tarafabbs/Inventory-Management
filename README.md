@@ -1,4 +1,4 @@
-# Inventory Management · Sutra
+# Inventory Management · IMS TARA MAA
 
 The working application is available at:
 
