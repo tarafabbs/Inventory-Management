@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `created_by` text;
