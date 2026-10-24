@@ -4,6 +4,7 @@ node_modules/
 supabase/.temp/
 .env*
 !.env.example
+!.env.production
 *.db
 *.db-shm
 *.db-wal

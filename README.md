@@ -28,7 +28,7 @@ Set these variables for Production and Preview:
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: the project's active publishable key
 - `SUPABASE_DATABASE_URL`: the transaction pooler URI from **Supabase Dashboard → Connect**, including the database password
 
-Use the pooler URI on port `6543`; the server disables prepared statements for pooler compatibility. Keep `SUPABASE_DATABASE_URL` server-only.
+The database layer also accepts the standard `POSTGRES_URL` or `DATABASE_URL` names created by hosting integrations. Use the pooler URI on port `6543`; the server disables prepared statements for pooler compatibility. Keep database URLs server-only.
 
 ## Local development
 
