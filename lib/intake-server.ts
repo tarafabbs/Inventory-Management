@@ -16,7 +16,7 @@ export async function intakeOperation(ctx:any){
    const id=uuid(),number=`LOT-${time.slice(0,4)}-${id.slice(0,6).toUpperCase()}`;ids.push(id);
    add('INSERT INTO lots(id,number,company_id,product_id,ownership,received_at,reference,stated,accepted,damaged,rejected,reason,notes,status,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?,0,0,?,?,?, ?,?)',id,number,c.id,product.id,c.ownership,v.received_at,v.reference.trim(),item.quantity,item.quantity,'',v.notes||'','PREPARED',actor,time);
    add('UPDATE companies SET sequence=sequence+? WHERE id=?',item.quantity,c.id);
-   for(let i=0;i<item.quantity;i++)add("INSERT INTO generated_labels(id,code,company_id,product_id,lot_id,ownership,state,created_at) SELECT ?,prefix||'-'||printf('%06d',sequence-?+?),?,?,?,?,'PENDING',? FROM companies WHERE id=?",uuid(),item.quantity,i+1,c.id,product.id,id,c.ownership,time,c.id);
+   for(let i=0;i<item.quantity;i++)add("INSERT INTO generated_labels(id,code,company_id,product_id,lot_id,ownership,state,created_at) SELECT ?,prefix||'-'||lpad((sequence-?+?)::text,6,'0'),?,?,?,?,'PENDING',? FROM companies WHERE id=?",uuid(),item.quantity,i+1,c.id,product.id,id,c.ownership,time,c.id);
   }
   return {ok:true,count,ids};
  }

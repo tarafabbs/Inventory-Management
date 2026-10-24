@@ -1,11 +1,13 @@
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import SignInButton from "./sign-in-button";
 
+export const dynamic = "force-dynamic";
+
 export default async function SignInPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (session) redirect("/");
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) redirect("/");
   return (
     <main className="loading-page">
       <div className="brand-logo">TM</div>

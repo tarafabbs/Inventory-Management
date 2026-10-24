@@ -22,7 +22,7 @@ export async function workshopOperation(ctx:any){
  if(op==='groundStaff'){
   if(v.id===generalGroundStaffId)throw fail('The warehouse Ground Staff pool is managed automatically.');
   if(!v.name?.trim())throw fail('Enter the Ground Staff member name.');
-  const id=v.id||uuid();if(v.id){const staff=await db.prepare('SELECT * FROM ground_staff WHERE id=?').bind(id).first();if(!staff)throw fail('Ground Staff record not found.');if(!v.active){const held=await db.prepare('SELECT COUNT(*) AS n FROM pieces WHERE ground_staff_id=?').bind(id).first();if(held.n)throw fail('Receive outstanding finishing pieces before archiving this staff member.');guard('SELECT COUNT(*)=0 FROM pieces WHERE ground_staff_id=?',id);}add('UPDATE ground_staff SET name=?,contact=?,active=? WHERE id=?',v.name.trim(),v.contact||'',v.active?1:0,id);}else add('INSERT INTO ground_staff(id,name,contact,active) VALUES(?,?,?,1)',id,v.name.trim(),v.contact||'');
+  const id=v.id||uuid();if(v.id){const staff=await db.prepare('SELECT * FROM ground_staff WHERE id=?').bind(id).first();if(!staff)throw fail('Ground Staff record not found.');if(!v.active){const held=await db.prepare('SELECT COUNT(*)::int AS n FROM pieces WHERE ground_staff_id=?').bind(id).first();if(held.n)throw fail('Receive outstanding finishing pieces before archiving this staff member.');guard('SELECT COUNT(*)=0 FROM pieces WHERE ground_staff_id=?',id);}add('UPDATE ground_staff SET name=?,contact=?,active=? WHERE id=?',v.name.trim(),v.contact||'',v.active?1:0,id);}else add('INSERT INTO ground_staff(id,name,contact,active) VALUES(?,?,?,1)',id,v.name.trim(),v.contact||'');
   return {ok:true,id};
  }
  if(!workshopTypes[op])return null;

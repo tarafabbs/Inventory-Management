@@ -1,28 +1,42 @@
 # Inventory Management · IMS TARA MAA
 
-The application is a Next.js deployment designed to run directly on Vercel. It no longer redirects visitors to another application domain. Authentication uses Better Auth with Google OAuth, and the inventory database uses Turso/libSQL.
+This is a Next.js application deployed on Vercel. It stays on the Vercel or custom domain and uses Supabase for Google authentication and PostgreSQL storage.
 
-## Vercel configuration
+The inventory tables live in the dedicated `inventory` schema of the existing Tarafabbs Supabase project. This keeps the inventory `products` and `users` separate from the storefront tables in `public`. Database writes remain transactional, and PostgreSQL triggers protect immutable barcodes, custody rules, sequence numbers, and append-only history.
 
-Set these environment variables for Production and Preview:
+## Supabase configuration
 
-- `BETTER_AUTH_SECRET`: a high-entropy random secret
-- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`: Google OAuth web credentials
-- `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`: the persistent libSQL database
-- `AUTH_ALLOWED_HOSTS`: comma-separated custom domains, without `https://`
+The schema migration is stored in `supabase/migrations/20261024190000_inventory_schema.sql`.
 
-Add this redirect URI to the Google OAuth web client:
+Google sign-in is already in use on this Supabase project. Its Google Cloud authorized redirect URI remains:
 
-`https://inventory-management-eight-ruby.vercel.app/api/auth/callback/google`
+`https://gylsoykqbvlcoikvittz.supabase.co/auth/v1/callback`
 
-When a custom domain is attached, add its host to `AUTH_ALLOWED_HOSTS` and add its callback URI to Google, for example:
+Under **Supabase Dashboard → Authentication → URL Configuration**, keep the storefront's existing Site URL and add these Redirect URLs:
 
-`https://im.tarafabbs.com/api/auth/callback/google`
+- Redirect URL: `https://im.tarafabbs.com/auth/callback`
+- Optional Vercel fallback: `https://inventory-management-eight-ruby.vercel.app/auth/callback`
+- Local development: `http://localhost:3000/auth/callback`
 
-Run `npm run db:migrate` against the Turso environment before the first production deployment. The first Google account to open an empty application database becomes the Admin; later staff must be added by exact Google email under Settings.
+The first Google account to sign in while `inventory.users` is empty becomes the inventory Admin. Later staff must be added by exact Google email in the app's Settings area.
+
+## Vercel environment
+
+Set these variables for Production and Preview:
+
+- `NEXT_PUBLIC_SUPABASE_URL`: the project API URL
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: the project's active publishable key
+- `SUPABASE_DATABASE_URL`: the transaction pooler URI from **Supabase Dashboard → Connect**, including the database password
+
+Use the pooler URI on port `6543`; the server disables prepared statements for pooler compatibility. Keep `SUPABASE_DATABASE_URL` server-only.
 
 ## Local development
 
-Copy `.env.example` to `.env.local`, fill in local credentials, then run `npm run db:migrate` and `npm run dev`. Without Turso variables, migrations and the app use `local.db` for development.
+Copy `.env.example` to `.env.local`, fill in the Supabase values, and run:
 
-The application includes receipts, Code 128 labels, label confirmation, saved scan drafts, handoffs, partial inspected returns, inventory and artisan balances, stock counts, exceptions, linked reversals/adjustments, staff roles, and CSV/print exports. It passed 19 workflow acceptance cases, four rule tests, type checking, a production build, and mobile/tablet scan-layout checks.
+```bash
+npm run db:migrate
+npm run dev
+```
+
+The application includes receipts, Code 128 labels, label confirmation, saved scan drafts, handoffs, partial inspected returns, inventory and artisan balances, stock counts, exceptions, linked reversals and adjustments, staff roles, and CSV/print exports.
