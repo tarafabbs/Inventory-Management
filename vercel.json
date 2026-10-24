@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": null,
+  "installCommand": null,
+  "outputDirectory": "vercel-entry",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "destination": "https://saree-ledger-akash.superkite128.chatgpt.site/:path*",
+      "permanent": false
+    }
+  ]
+}
