@@ -45,7 +45,7 @@ create table users (
   id text primary key,
   email text not null unique,
   name text not null,
-  role text not null check (role in ('Admin', 'Supervisor', 'Operator', 'Viewer')),
+  role text not null check (role in ('Admin', 'Supervisor', 'Receiving', 'Issue', 'Inspection', 'Viewer')),
   active integer not null default 1 check (active in (0, 1)),
   created_at text not null
 );
