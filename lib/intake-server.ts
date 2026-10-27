@@ -7,11 +7,28 @@ export async function intakeOperation(ctx:any){
   if(v.reference.trim().length>200)throw fail('Keep the bill / challan number under 200 characters.');
   if(!v.received_at||!Number.isFinite(Date.parse(v.received_at)))throw fail('Enter a valid arrival date.');
   if(typeof v.notes!=='string'||v.notes.length>2000)throw fail('Keep bill notes under 2,000 characters.');
+  const quantity=Number(v.quantity);
+  if(!Number.isInteger(quantity)||quantity<1||quantity>400)throw fail('Use a whole quantity from 1 to 400.');
   const lot=await db.prepare("SELECT * FROM lots WHERE id=? AND status<>'DRAFT'").bind(v.id).first();
   if(!lot)throw fail('This bill could not be found.',404);
-  guard('SELECT COUNT(*)=1 FROM lots WHERE id=? AND reference=? AND received_at=? AND notes=?',lot.id,lot.reference,lot.received_at,lot.notes);
-  add('UPDATE lots SET reference=?,received_at=?,notes=? WHERE id=?',v.reference.trim(),v.received_at,v.notes.trim(),lot.id);
-  return {ok:true,id:lot.id};
+  const registeredRow=await db.prepare('SELECT COUNT(*)::int AS n FROM pieces WHERE lot_id=?').bind(lot.id).first();
+  const pendingRow=await db.prepare("SELECT COUNT(*)::int AS n FROM generated_labels WHERE lot_id=? AND state='PENDING'").bind(lot.id).first();
+  const registered=Number(registeredRow?.n||0),oldPending=Number(pendingRow?.n||0);
+  if(quantity<registered)throw fail(`This bill already has ${registered} scanned pieces. Quantity cannot be lower than that.`,409);
+  if(registered&&(v.company_id!==lot.company_id||v.product_id!==lot.product_id))throw fail('Company and product cannot change after a barcode from this bill has been scanned.',409);
+  const c=await db.prepare('SELECT * FROM companies WHERE id=?').bind(v.company_id).first();
+  const product=await db.prepare('SELECT * FROM products WHERE id=?').bind(v.product_id).first();
+  if(!c||(!c.active&&c.id!==lot.company_id))throw fail('Choose an active company, association or own brand.');
+  if(!product||(!product.active&&product.id!==lot.product_id))throw fail('Choose an active product.');
+  guard("SELECT COUNT(*)=1 FROM lots WHERE id=? AND company_id=? AND product_id=? AND reference=? AND received_at=? AND stated=? AND accepted=? AND notes=? AND (SELECT COUNT(*) FROM pieces WHERE lot_id=?)=? AND (SELECT COUNT(*) FROM generated_labels WHERE lot_id=? AND state='PENDING')=?",lot.id,lot.company_id,lot.product_id,lot.reference,lot.received_at,lot.stated,lot.accepted,lot.notes,lot.id,registered,lot.id,oldPending);
+  add("UPDATE generated_labels SET state='VOIDED' WHERE lot_id=? AND state='PENDING'",lot.id);
+  add('UPDATE lots SET company_id=?,product_id=?,ownership=?,reference=?,received_at=?,stated=?,accepted=?,notes=? WHERE id=?',c.id,product.id,c.ownership,v.reference.trim(),v.received_at,quantity,quantity,v.notes.trim(),lot.id);
+  const replacementCount=quantity-registered;
+  if(replacementCount){
+   add('UPDATE companies SET sequence=sequence+? WHERE id=?',replacementCount,c.id);
+   for(let i=0;i<replacementCount;i++)add("INSERT INTO generated_labels(id,code,company_id,product_id,lot_id,ownership,state,created_at) SELECT ?,prefix||'-'||lpad((sequence-?+?)::text,6,'0'),?,?,?,?,'PENDING',? FROM companies WHERE id=?",uuid(),replacementCount,i+1,c.id,product.id,lot.id,c.ownership,time,c.id);
+  }
+  return {ok:true,id:lot.id,count:replacementCount,registered,regenerated:replacementCount>0};
  }
  if(op==='prepareReceipt'){
   if(!v.reference?.trim())throw fail('Enter the bill / challan number.');

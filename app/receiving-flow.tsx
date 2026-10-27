@@ -28,14 +28,15 @@ export function NewEntryForm({d,busy,submit,createProduct,canCreateProduct}:any)
 }
 
 export function EditBillForm({lot,d,busy,submit}:any){
- const company=d.companies.find((c:any)=>c.id===lot.company_id)?.name||'Unknown source';
- const product=d.products.find((p:any)=>p.id===lot.product_id)?.name||'Unknown product';
+ const registered=d.pieces.filter((p:any)=>p.lot_id===lot.id).length;
+ const pending=d.generatedLabels.filter((p:any)=>p.lot_id===lot.id&&p.state==='PENDING').length;
  return <form onSubmit={e=>{e.preventDefault();submit({id:lot.id,...Object.fromEntries(new FormData(e.currentTarget))})}}>
-  <div className="info-strip">{company} · {product} · {lot.accepted} barcode {lot.accepted===1?'label':'labels'}</div>
+  <div className="info-strip">{registered} scanned · {pending} pending. Saving replaces every pending barcode with a fresh matching label.</div>
+  <div className="form-grid three"><label className="field"><span>Company / association / own brand</span><select name="company_id" required defaultValue={lot.company_id} disabled={registered>0}>{d.companies.filter((c:any)=>c.active||c.id===lot.company_id).map((c:any)=><option key={c.id} value={c.id}>{c.name}{c.active?'':' · Archived'}</option>)}</select>{registered>0&&<input type="hidden" name="company_id" value={lot.company_id}/>}</label><label className="field"><span>Saree / product type</span><select name="product_id" required defaultValue={lot.product_id} disabled={registered>0}>{d.products.filter((p:any)=>p.active||p.id===lot.product_id).map((p:any)=><option key={p.id} value={p.id}>{p.name}{p.active?'':' · Archived'}</option>)}</select>{registered>0&&<input type="hidden" name="product_id" value={lot.product_id}/>}</label><label className="field"><span>Quantity</span><input name="quantity" type="number" min={Math.max(1,registered)} max="400" required defaultValue={lot.accepted}/></label></div>
   <div className="form-grid"><label className="field"><span>Bill / challan number</span><input name="reference" required maxLength={200} defaultValue={lot.reference}/></label><label className="field"><span>Arrival date</span><input name="received_at" type="date" required defaultValue={String(lot.received_at).slice(0,10)}/></label></div>
   <label className="field"><span>Bill notes</span><textarea name="notes" rows={4} maxLength={2000} defaultValue={lot.notes}/></label>
-  <p className="muted">The source, product, and quantity stay fixed because this bill already has permanent barcode reservations.</p>
-  <div className="modal-footer"><button className="btn primary" disabled={busy}>{busy?'Saving…':'Save changes'}<Check size={16}/></button></div>
+  <p className="muted">Old pending labels stop working after this edit. Print and attach the new labels. Company and product stay fixed only when this bill already has scanned pieces.</p>
+  <div className="modal-footer"><button className="btn primary" disabled={busy}>{busy?'Saving…':pending||registered<lot.accepted?'Save & regenerate barcodes':'Save changes'}<Check size={16}/></button></div>
  </form>
 }
 
