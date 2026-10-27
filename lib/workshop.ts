@@ -40,18 +40,17 @@ export async function workshopOperation(ctx:any){
   const p=await db.prepare('SELECT p.*,c.name AS company_name,pr.name AS product_name,l.number AS lot_number,g.name AS ground_staff_name,a.name AS current_artisan_name FROM pieces p JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id JOIN lots l ON l.id=p.lot_id LEFT JOIN ground_staff g ON g.id=p.ground_staff_id LEFT JOIN artisans a ON a.id=p.artisan_id WHERE p.id=?').bind(line.id).first();
   if(!p||p.version!==line.version)throw fail('A scanned saree changed. Refresh and rescan the whole list.',409);
   const error=workshopError(p,op,v);if(error)throw fail(p.code+': '+error,409);
-  if(['artistTransfer','groundDispute','stockDispute'].includes(op)&&!line.reason?.trim())throw fail('Record a reason / work description for each saree.');
   if(op==='reprintOut'){line.outcome='OK';line.reason=line.reason?.trim()||`Reprint requested from ${String(p.condition).toLowerCase().replaceAll('_',' ')} status`;}
   const receiving=['reprintReceive','finishReceive'].includes(op),dispute=['groundDispute','stockDispute'].includes(op);
   if(!receiving&&!dispute&&line.outcome!=='OK')throw fail('Confirm Condition OK / identity checked for each outgoing saree.');
   if(receiving&&!['OK','DAMAGED','DISPUTED','NEEDS_REWORK'].includes(line.outcome))throw fail('Inspect every returned saree before confirmation.');
   if(dispute&&!['DAMAGED','DISPUTED'].includes(line.outcome))throw fail('Choose Damage or Dispute.');
-  if((receiving&&line.outcome!=='OK'||dispute)&&!line.reason?.trim())throw fail('Describe every damaged / disputed / rework finding.');
-  if(op==='finishReceive'&&p.condition!=='FINISHING'&&line.outcome==='OK'&&!line.reason?.trim())throw fail('Explain how the finishing dispute was resolved before accepting finished goods.');
   staged.push({p,line});
  }
- const type=workshopTypes[op],snapshot=staged.map(({p,line}:any)=>({...p,outcome:line.outcome,inspection_reason:line.reason||'',from_artisan_id:fromArtist?.id||p.artisan_id||null,from_artisan_name:fromArtist?.name||p.current_artisan_name||'',to_artisan_id:['artistTransfer','reprintOut'].includes(op)?artist.id:null,artisan_name:artist?.name||null,artisan_work_type:artist?.work_type||null,artisan_work_description:artist?.work_description||'',ground_staff_id:staff?.id||p.ground_staff_id||null,ground_staff_name:staff?.name||p.ground_staff_name||null}));
- const tx=transaction(type,artist?.id||null,v.reason||staged.map((s:any)=>s.line.reason||'').filter(Boolean).join('; '),snapshot);
+ const defaultReason=(line:any)=>({artistTransfer:'Transferred directly between artists',groundSend:'Issued to warehouse finishing',groundDispute:`${line.outcome==='DAMAGED'?'Damage':'Dispute'} recorded during finishing`,stockDispute:`Warehouse ${line.outcome==='DAMAGED'?'damage':'dispute'} recorded`,reprintOut:'Sent for reprint',reprintReceive:line.outcome==='OK'?'Reprint work received and inspected':`Reprint received as ${String(line.outcome).toLowerCase().replaceAll('_',' ')}`,finishReceive:line.outcome==='OK'?'Final quality check passed; finished goods received':`Finishing received as ${String(line.outcome).toLowerCase().replaceAll('_',' ')}`} as Record<string,string>)[op]||'Movement recorded';
+ const reasonFor=(line:any)=>line.reason?.trim()||defaultReason(line);
+ const type=workshopTypes[op],snapshot=staged.map(({p,line}:any)=>({...p,outcome:line.outcome,inspection_reason:reasonFor(line),from_artisan_id:fromArtist?.id||p.artisan_id||null,from_artisan_name:fromArtist?.name||p.current_artisan_name||'',to_artisan_id:['artistTransfer','reprintOut'].includes(op)?artist.id:null,artisan_name:artist?.name||null,artisan_work_type:artist?.work_type||null,artisan_work_description:artist?.work_description||'',ground_staff_id:staff?.id||p.ground_staff_id||null,ground_staff_name:staff?.name||p.ground_staff_name||null}));
+ const tx=transaction(type,artist?.id||null,v.reason||staged.map((s:any)=>`${s.p.code}: ${reasonFor(s.line)}`).join('; '),snapshot);
  for(const {p,line} of staged){
   let after:any={...p};
   if(op==='artistTransfer')after={...p,artisan_id:artist.id};
@@ -59,7 +58,7 @@ export async function workshopOperation(ctx:any){
   if(op==='groundSend')after={...p,holder:'GROUND_STAFF',artisan_id:null,ground_staff_id:staff.id,condition:'FINISHING'};
   if(['groundDispute','stockDispute'].includes(op))after={...p,condition:line.outcome};
   if(['finishReceive','reprintReceive'].includes(op))after={...p,holder:'IN_HOUSE',artisan_id:null,ground_staff_id:null,condition:line.outcome==='OK'?(op==='finishReceive'?'FINISHED':'ACCEPTED_WORK'):line.outcome};
-  const reason=line.reason||(['groundSend'].includes(op)?'Issued to warehouse finishing':op==='finishReceive'?'Final quality check passed; finished goods received':'Reprint work received and inspected');
+  const reason=reasonFor(line);
   move(p,type,after,reason,tx);
   if(op==='reprintOut'&&['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition))add("UPDATE exceptions SET status='RESOLVED',resolution=? WHERE status='OPEN' AND (title LIKE ? OR detail LIKE ?)",`${actor} · ${time} · Routed to reprint in ${tx}`,`%${p.code}%`,`%${p.code}%`);
   if(['groundDispute','stockDispute'].includes(op)||['finishReceive','reprintReceive'].includes(op)&&line.outcome!=='OK')add('INSERT INTO exceptions(id,title,detail,status,actor,created_at) VALUES(?,?,?,?,?,?)',uuid(),`${line.outcome} · ${p.code}`,`${reason} · ${staff?'Ground Staff '+staff.name:artist?'Artist '+artist.name:p.ground_staff_name||'Warehouse'} · ${tx}`,'OPEN',actor,time);
