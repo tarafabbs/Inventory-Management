@@ -78,7 +78,7 @@ export async function intakeOperation(ctx:any){
   if(!p||p.version!==line.version)throw fail('A piece changed since scanning. Refresh and scan again.',409);
   if(!line.reason?.trim()&&!v.reason?.trim())throw fail('Record a reason for every damaged / disputed / returned piece.');
   if(op==='supplierReturn'){
-   if(p.holder!=='IN_HOUSE'||!['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition))throw fail('Only in-house damaged or disputed pieces can be returned to source.',409);
+   if(p.holder==='RETURNED_TO_SOURCE'||!['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition))throw fail('Only damaged, disputed or rework pieces can be returned to source.',409);
    if(!v.company_id||p.company_id!==v.company_id)throw fail('Scan only pieces belonging to the selected source company.');
   }else if(!['WITH_ARTISAN','IN_HOUSE'].includes(p.holder)||!p.label_confirmed_at||p.condition==='DISPUTED')throw fail('This piece cannot be disputed again in its current state.');
   if(op==='dispute'&&v.artisan_id&&p.artisan_id!==v.artisan_id)throw fail('This piece is not with the selected artisan.');
@@ -90,6 +90,7 @@ export async function intakeOperation(ctx:any){
   const reason=line.reason||v.reason;
   const after=op==='supplierReturn'?{...p,holder:'RETURNED_TO_SOURCE',artisan_id:null}:{...p,condition:'DISPUTED'};
   move(p,type,after,reason,tx);
+  if(op==='supplierReturn')add("UPDATE exceptions SET status='RESOLVED',resolution=? WHERE status='OPEN' AND (title LIKE ? OR detail LIKE ?)",`${actor} · ${time} · Returned to origin in ${tx}`,`%${p.code}%`,`%${p.code}%`);
   if(op==='dispute')add('INSERT INTO exceptions(id,title,detail,status,actor,created_at) VALUES(?,?,?,?,?,?)',uuid(),`Dispute · ${p.code}`,`${reason} · Artisan: ${p.artisan_id||'In house'} · Transaction: ${tx}`,'OPEN',actor,time);
  }
  return {ok:true,id:tx,count:staged.length};

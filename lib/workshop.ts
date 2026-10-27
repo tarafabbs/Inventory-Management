@@ -11,7 +11,10 @@ export function workshopError(p:any,op:string,v:any){
  if(op==='groundSend'&&(p.holder!=='IN_HOUSE'||!['AVAILABLE','ACCEPTED_WORK'].includes(p.condition)))return 'Only inspected in-house fresh or artist-delivered sarees can go to finishing.';
  if(['groundDispute','finishReceive'].includes(op)&&(p.holder!=='GROUND_STAFF'||v.ground_staff_id&&p.ground_staff_id!==v.ground_staff_id))return 'This saree is not in the current Ground Staff finishing stock.';
  if(op==='groundDispute'&&['DAMAGED','DISPUTED'].includes(p.condition))return 'This finishing dispute is already recorded.';
- if(op==='reprintOut'&&(p.holder!=='IN_HOUSE'||!['AVAILABLE','ACCEPTED_WORK','DAMAGED','DISPUTED','NEEDS_REWORK','FINISHED'].includes(p.condition)))return 'Receive the saree into the warehouse before sending it for reprint.';
+ if(op==='reprintOut'){
+  const disputed=['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition);
+  if(!['AVAILABLE','ACCEPTED_WORK','DAMAGED','DISPUTED','NEEDS_REWORK','FINISHED'].includes(p.condition)||(!disputed&&p.holder!=='IN_HOUSE'))return 'Only in-house inspected sarees or disputed sarees can be sent for reprint.';
+ }
  if(op==='reprintReceive'&&(p.holder!=='WITH_ARTISAN'||p.artisan_id!==v.artisan_id||p.condition!=='REPRINTING'))return 'Scan only reprint sarees held by the selected artist.';
  if(op==='stockDispute'&&(p.holder!=='IN_HOUSE'||['DAMAGED','DISPUTED','PENDING_LABEL_CONFIRMATION'].includes(p.condition)))return 'Scan an in-house saree that has not already been marked damaged or disputed.';
  return '';
@@ -34,7 +37,7 @@ export async function workshopOperation(ctx:any){
  if(op==='artistTransfer'){fromArtist=await db.prepare('SELECT * FROM artisans WHERE id=? AND active=1').bind(v.from_artisan_id||'').first();if(!fromArtist)throw fail('Choose the current sending artist.');guard('SELECT COUNT(*)=1 FROM artisans WHERE id=? AND active=1',fromArtist.id);}
  const staged=[];
  for(const line of v.lines){
-  const p=await db.prepare('SELECT p.*,c.name AS company_name,pr.name AS product_name,l.number AS lot_number,g.name AS ground_staff_name FROM pieces p JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id JOIN lots l ON l.id=p.lot_id LEFT JOIN ground_staff g ON g.id=p.ground_staff_id WHERE p.id=?').bind(line.id).first();
+  const p=await db.prepare('SELECT p.*,c.name AS company_name,pr.name AS product_name,l.number AS lot_number,g.name AS ground_staff_name,a.name AS current_artisan_name FROM pieces p JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id JOIN lots l ON l.id=p.lot_id LEFT JOIN ground_staff g ON g.id=p.ground_staff_id LEFT JOIN artisans a ON a.id=p.artisan_id WHERE p.id=?').bind(line.id).first();
   if(!p||p.version!==line.version)throw fail('A scanned saree changed. Refresh and rescan the whole list.',409);
   const error=workshopError(p,op,v);if(error)throw fail(p.code+': '+error,409);
   if(['reprintOut','artistTransfer','groundDispute','stockDispute'].includes(op)&&!line.reason?.trim())throw fail('Record a reason / work description for each saree.');
@@ -46,7 +49,7 @@ export async function workshopOperation(ctx:any){
   if(op==='finishReceive'&&p.condition!=='FINISHING'&&line.outcome==='OK'&&!line.reason?.trim())throw fail('Explain how the finishing dispute was resolved before accepting finished goods.');
   staged.push({p,line});
  }
- const type=workshopTypes[op],snapshot=staged.map(({p,line}:any)=>({...p,outcome:line.outcome,inspection_reason:line.reason||'',from_artisan_id:fromArtist?.id||p.artisan_id||null,from_artisan_name:fromArtist?.name||'',to_artisan_id:['artistTransfer','reprintOut'].includes(op)?artist.id:null,artisan_name:artist?.name||null,artisan_work_type:artist?.work_type||null,artisan_work_description:artist?.work_description||'',ground_staff_id:staff?.id||p.ground_staff_id||null,ground_staff_name:staff?.name||p.ground_staff_name||null}));
+ const type=workshopTypes[op],snapshot=staged.map(({p,line}:any)=>({...p,outcome:line.outcome,inspection_reason:line.reason||'',from_artisan_id:fromArtist?.id||p.artisan_id||null,from_artisan_name:fromArtist?.name||p.current_artisan_name||'',to_artisan_id:['artistTransfer','reprintOut'].includes(op)?artist.id:null,artisan_name:artist?.name||null,artisan_work_type:artist?.work_type||null,artisan_work_description:artist?.work_description||'',ground_staff_id:staff?.id||p.ground_staff_id||null,ground_staff_name:staff?.name||p.ground_staff_name||null}));
  const tx=transaction(type,artist?.id||null,v.reason||staged.map((s:any)=>s.line.reason||'').filter(Boolean).join('; '),snapshot);
  for(const {p,line} of staged){
   let after:any={...p};
@@ -57,6 +60,7 @@ export async function workshopOperation(ctx:any){
   if(['finishReceive','reprintReceive'].includes(op))after={...p,holder:'IN_HOUSE',artisan_id:null,ground_staff_id:null,condition:line.outcome==='OK'?(op==='finishReceive'?'FINISHED':'ACCEPTED_WORK'):line.outcome};
   const reason=line.reason||(['groundSend'].includes(op)?'Issued to warehouse finishing':op==='finishReceive'?'Final quality check passed; finished goods received':'Reprint work received and inspected');
   move(p,type,after,reason,tx);
+  if(op==='reprintOut'&&['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition))add("UPDATE exceptions SET status='RESOLVED',resolution=? WHERE status='OPEN' AND (title LIKE ? OR detail LIKE ?)",`${actor} · ${time} · Routed to reprint in ${tx}`,`%${p.code}%`,`%${p.code}%`);
   if(['groundDispute','stockDispute'].includes(op)||['finishReceive','reprintReceive'].includes(op)&&line.outcome!=='OK')add('INSERT INTO exceptions(id,title,detail,status,actor,created_at) VALUES(?,?,?,?,?,?)',uuid(),`${line.outcome} · ${p.code}`,`${reason} · ${staff?'Ground Staff '+staff.name:artist?'Artist '+artist.name:p.ground_staff_name||'Warehouse'} · ${tx}`,'OPEN',actor,time);
  }
  return {ok:true,id:tx,count:staged.length};
