@@ -38,6 +38,8 @@ export async function intakeOperation(ctx:any){
   if(v.items.some((i:any)=>!Number.isInteger(i.quantity)||i.quantity<1)||count>400)throw fail('Use whole quantities, up to 400 labels per bill.');
   const c=await db.prepare('SELECT * FROM companies WHERE id=? AND active=1').bind(v.company_id).first();
   if(!c)throw fail('Choose an active company, association or own brand.');
+  if(v.source_type&&!['OWN','EXTERNAL'].includes(v.source_type))throw fail('Choose Jobwork Company or TaraFabbs Own Product.');
+  if(v.source_type&&c.ownership!==v.source_type)throw fail('The selected source does not match the New Entry source type.');
   guard('SELECT COUNT(*)=1 FROM companies WHERE id=? AND active=1',c.id);
   const ids=[];
   for(const item of v.items){
@@ -78,6 +80,7 @@ export async function intakeOperation(ctx:any){
   if(!p||p.version!==line.version)throw fail('A piece changed since scanning. Refresh and scan again.',409);
   if(!line.reason?.trim()&&!v.reason?.trim())throw fail('Record a reason for every damaged / disputed / returned piece.');
   if(op==='supplierReturn'){
+   if(p.holder==='FACTORY_RETURN_PENDING')throw fail('Factory Staff must receive this office/customer return before another movement.',409);
    if(p.holder==='RETURNED_TO_SOURCE'||!['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition))throw fail('Only damaged, disputed or rework pieces can be returned to source.',409);
    if(!v.company_id||p.company_id!==v.company_id)throw fail('Scan only pieces belonging to the selected source company.');
   }else if(!['WITH_ARTISAN','IN_HOUSE'].includes(p.holder)||!p.label_confirmed_at||p.condition==='DISPUTED')throw fail('This piece cannot be disputed again in its current state.');

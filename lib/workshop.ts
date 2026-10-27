@@ -3,12 +3,13 @@ export const workshopTypes:Record<string,string>={artistTransfer:'ARTIST_TRANSFE
 export function workshopError(p:any,op:string,v:any){
  if(!p||!p.label_confirmed_at)return 'Scan a registered and inspected saree.';
  if(p.holder==='RETURNED_TO_SOURCE')return 'This saree has already been returned to its origin.';
+ if(p.holder==='FACTORY_RETURN_PENDING')return 'Factory Staff must complete Receive Return at Factory before any reprint or finishing movement.';
  if(op==='artistTransfer'){
   if(!v.from_artisan_id||!v.artisan_id||v.from_artisan_id===v.artisan_id)return 'Choose two different artists.';
   if(p.holder!=='WITH_ARTISAN'||p.artisan_id!==v.from_artisan_id)return 'This saree is not with the selected sending artist.';
   if(!['AVAILABLE','ACCEPTED_WORK'].includes(p.condition))return 'Receive and resolve disputed or reprint work before transferring it.';
  }
- if(op==='groundSend'&&(p.holder!=='IN_HOUSE'||!['AVAILABLE','ACCEPTED_WORK'].includes(p.condition)))return 'Only inspected in-house fresh or artist-delivered sarees can go to finishing.';
+ if(op==='groundSend'&&(p.holder!=='IN_HOUSE'||!['AVAILABLE','ACCEPTED_WORK','DISPUTED'].includes(p.condition)))return 'Only inspected in-house, artist-delivered or received disputed sarees can go to finishing.';
  if(['groundDispute','finishReceive'].includes(op)&&(p.holder!=='GROUND_STAFF'||v.ground_staff_id&&p.ground_staff_id!==v.ground_staff_id))return 'This saree is not in the current Ground Staff finishing stock.';
  if(op==='groundDispute'&&['DAMAGED','DISPUTED'].includes(p.condition))return 'This finishing dispute is already recorded.';
  if(op==='reprintOut'){
@@ -61,6 +62,7 @@ export async function workshopOperation(ctx:any){
   const reason=reasonFor(line);
   move(p,type,after,reason,tx);
   if(op==='reprintOut'&&['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition))add("UPDATE exceptions SET status='RESOLVED',resolution=? WHERE status='OPEN' AND (title LIKE ? OR detail LIKE ?)",`${actor} · ${time} · Routed to reprint in ${tx}`,`%${p.code}%`,`%${p.code}%`);
+  if(op==='groundSend'&&p.condition==='DISPUTED')add("UPDATE exceptions SET status='RESOLVED',resolution=? WHERE status='OPEN' AND (title LIKE ? OR detail LIKE ?)",`${actor} · ${time} · Routed to Ground Staff in ${tx}`,`%${p.code}%`,`%${p.code}%`);
   if(['groundDispute','stockDispute'].includes(op)||['finishReceive','reprintReceive'].includes(op)&&line.outcome!=='OK')add('INSERT INTO exceptions(id,title,detail,status,actor,created_at) VALUES(?,?,?,?,?,?)',uuid(),`${line.outcome} · ${p.code}`,`${reason} · ${staff?'Ground Staff '+staff.name:artist?'Artist '+artist.name:p.ground_staff_name||'Warehouse'} · ${tx}`,'OPEN',actor,time);
  }
  return {ok:true,id:tx,count:staged.length};
