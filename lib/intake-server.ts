@@ -1,6 +1,18 @@
 // Barcode reservations are documents; only an inspected scan creates inventory.
 export async function intakeOperation(ctx:any){
  const {op,v,db,add,guard,event,move,transaction,actor,time,uuid,fail}=ctx;
+ if(op==='updatePreparedReceipt'){
+  if(!v.id||typeof v.id!=='string')throw fail('Choose a bill to edit.');
+  if(!v.reference?.trim())throw fail('Enter the bill / challan number.');
+  if(v.reference.trim().length>200)throw fail('Keep the bill / challan number under 200 characters.');
+  if(!v.received_at||!Number.isFinite(Date.parse(v.received_at)))throw fail('Enter a valid arrival date.');
+  if(typeof v.notes!=='string'||v.notes.length>2000)throw fail('Keep bill notes under 2,000 characters.');
+  const lot=await db.prepare("SELECT * FROM lots WHERE id=? AND status<>'DRAFT'").bind(v.id).first();
+  if(!lot)throw fail('This bill could not be found.',404);
+  guard('SELECT COUNT(*)=1 FROM lots WHERE id=? AND reference=? AND received_at=? AND notes=?',lot.id,lot.reference,lot.received_at,lot.notes);
+  add('UPDATE lots SET reference=?,received_at=?,notes=? WHERE id=?',v.reference.trim(),v.received_at,v.notes.trim(),lot.id);
+  return {ok:true,id:lot.id};
+ }
  if(op==='prepareReceipt'){
   if(!v.reference?.trim())throw fail('Enter the bill / challan number.');
   if(!v.received_at||!Number.isFinite(Date.parse(v.received_at)))throw fail('Enter a valid arrival date.');
