@@ -2,7 +2,7 @@
 import React,{useState,useEffect,useRef} from 'react';
 import {LayoutDashboard,Package,Layers3,ArrowUpRight,ArrowDownLeft,ScanLine,Users,ClipboardCheck,ChartNoAxesCombined,Building2,Settings,Search,ChevronDown,ChevronRight,Plus,ArrowRight,Download,Printer,Check,CheckCircle2,AlertCircle,TriangleAlert,X,Menu,Bell,Command,Copy,RotateCcw,SlidersHorizontal,ArrowLeft,HelpCircle,MoveUpRight,Box,Tag,FileText,Clock,ShieldCheck,Trash2,ExternalLink} from 'lucide-react';
 import {demoData} from '../lib/demo';
-import {scanError,permitted,roles} from '../lib/rules';
+import {scanError,permitted,roles,artisanWorkTypes} from '../lib/rules';
 import {NewEntryForm,EditBillForm,ReceivingCenter,ScanStation,DisputeLog,BillDetail} from './receiving-flow';
 import ScannerInput from './scanner-input';
 import Barcode from './barcode-preview';
@@ -11,7 +11,6 @@ import ArtistWorkHistory from './artist-work-history';
 import {artistWorkRecords} from '../lib/artist-history';
 import SignOutButton from './sign-out-button';
 const labels:Record<string,string>={GROUND_STAFF:'With Ground Staff',FINISHING:'Warehouse finishing',FINISHED:'Finished Goods',REPRINTING:'With reprint artist',ARTIST_TRANSFER:'Artist transfer',GROUND_ISSUE:'Issued to Ground Staff',GROUND_DISPUTE:'Finishing dispute',STOCK_DISPUTE:'Warehouse dispute',REPRINT_OUT:'Out for reprint',REPRINT_RECEIVE:'Reprint received',FINISH_RECEIVE:'Finished goods received',DISPUTED:'Disputed',RETURNED_TO_SOURCE:'Returned to source',PREPARED:'Labels prepared',INTAKE:'Inventory entry',SUPPLIER_RETURN:'Source return',DISPUTE:'Dispute',AVAILABLE:'Available',ACCEPTED_WORK:'Work accepted',WITH_ARTISAN:'With artisan',PENDING_LABEL_CONFIRMATION:'Pending label',NEEDS_REWORK:'Needs rework',DAMAGED:'Damaged',EXCEPTION:'Location unknown',IN_HOUSE:'In house',OWN:'Own stock',EXTERNAL:'External',CONFIRMED:'Confirmed',DRAFT:'Draft',OPEN:'Open',CLOSED:'Closed',RESOLVED:'Resolved',VOIDED_BY_REVERSAL:'Reversed',EXPECTED:'Counted',UNEXPECTED:'Unexpected'};
-const artisanWorkTypes=['Free Hand Paint','Kalamkari','Batik Paint','Eco Print','Momchitra','Alcohol Paint','Block Print','Screen Print','Block Batik Print','Mix Dye','Sibori Dye','Pigment Block','Cotton Batik','Others'];
 const nav=[{group:'WORKSPACE',items:[['Overview',LayoutDashboard],['Inventory',Package],['Receipts & lots',Layers3],['Label center',ScanLine]]},{group:'ARTISAN WORK',items:[['Handoff',ArrowUpRight],['Returns',ArrowDownLeft],['Artisans',Users],['Warehouse',Package]]},{group:'CONTROL & INSIGHTS',items:[['Stock checks',ClipboardCheck],['Exceptions',TriangleAlert],['Reports',ChartNoAxesCombined]]},{group:'MANAGE',items:[['Companies',Building2],['Product types',Tag],['Settings',Settings]]}];
 const number=(n:number)=>n.toLocaleString('en-IN');
 const display=(x:string)=>labels[x]||x;

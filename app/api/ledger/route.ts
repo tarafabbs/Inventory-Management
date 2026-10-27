@@ -1,11 +1,10 @@
 import { db } from '@/lib/database';
 import { createClient } from '@/lib/supabase/server';
-import { permitted, quantities, uniqueLines, scanError, roles } from '../../../lib/rules';
+import { permitted, quantities, uniqueLines, scanError, roles, artisanWorkTypes } from '../../../lib/rules';
 import {workshopOperation} from '../../../lib/workshop';
 import {intakeOperation} from '../../../lib/intake-server';
 export const dynamic='force-dynamic';
 const uuid=()=>crypto.randomUUID(), now=()=>new Date().toISOString();
-const artisanWorkTypes=['Free Hand Paint','Kalamkari','Batik Paint','Eco Print','Momchitra','Alcohol Paint','Block Print','Screen Print','Block Batik Print','Mix Dye','Sibori Dye','Pigment Block','Cotton Batik','Others'];
 const fail=(message:string,status=400)=>Object.assign(new Error(message),{status});
 const json=(v:any,status=200)=>Response.json(v,{status,headers:{'Cache-Control':'no-store'}});
 const databaseUnavailable=(message:string)=>/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|connection timeout|password authentication failed|server closed the connection/i.test(message);
