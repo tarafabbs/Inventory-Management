@@ -13,7 +13,7 @@ export function workshopError(p:any,op:string,v:any){
  if(op==='groundDispute'&&['DAMAGED','DISPUTED'].includes(p.condition))return 'This finishing dispute is already recorded.';
  if(op==='reprintOut'){
   const disputed=['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition);
-  if(!['AVAILABLE','ACCEPTED_WORK','DAMAGED','DISPUTED','NEEDS_REWORK','FINISHED'].includes(p.condition)||(!disputed&&p.holder!=='IN_HOUSE'))return 'Only in-house inspected sarees or disputed sarees can be sent for reprint.';
+  if(!disputed)return 'Record the damage, dispute or rework finding before sending this saree for reprint.';
  }
  if(op==='reprintReceive'&&(p.holder!=='WITH_ARTISAN'||p.artisan_id!==v.artisan_id||p.condition!=='REPRINTING'))return 'Scan only reprint sarees held by the selected artist.';
  if(op==='stockDispute'&&(p.holder!=='IN_HOUSE'||['DAMAGED','DISPUTED','PENDING_LABEL_CONFIRMATION'].includes(p.condition)))return 'Scan an in-house saree that has not already been marked damaged or disputed.';
@@ -40,7 +40,8 @@ export async function workshopOperation(ctx:any){
   const p=await db.prepare('SELECT p.*,c.name AS company_name,pr.name AS product_name,l.number AS lot_number,g.name AS ground_staff_name,a.name AS current_artisan_name FROM pieces p JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id JOIN lots l ON l.id=p.lot_id LEFT JOIN ground_staff g ON g.id=p.ground_staff_id LEFT JOIN artisans a ON a.id=p.artisan_id WHERE p.id=?').bind(line.id).first();
   if(!p||p.version!==line.version)throw fail('A scanned saree changed. Refresh and rescan the whole list.',409);
   const error=workshopError(p,op,v);if(error)throw fail(p.code+': '+error,409);
-  if(['reprintOut','artistTransfer','groundDispute','stockDispute'].includes(op)&&!line.reason?.trim())throw fail('Record a reason / work description for each saree.');
+  if(['artistTransfer','groundDispute','stockDispute'].includes(op)&&!line.reason?.trim())throw fail('Record a reason / work description for each saree.');
+  if(op==='reprintOut'){line.outcome='OK';line.reason=line.reason?.trim()||`Reprint requested from ${String(p.condition).toLowerCase().replaceAll('_',' ')} status`;}
   const receiving=['reprintReceive','finishReceive'].includes(op),dispute=['groundDispute','stockDispute'].includes(op);
   if(!receiving&&!dispute&&line.outcome!=='OK')throw fail('Confirm Condition OK / identity checked for each outgoing saree.');
   if(receiving&&!['OK','DAMAGED','DISPUTED','NEEDS_REWORK'].includes(line.outcome))throw fail('Inspect every returned saree before confirmation.');
