@@ -47,4 +47,8 @@ Barcode Recovery is available in Quick actions, the all-in-one scanner, Label ce
 
 Recovery requests persist until attachment is confirmed by scanning the replacement, or cancelled with a reason. Printer retries stay under the same request. Unidentified physical items can be reported separately and matched later; they cannot generate labels or stock. Closed records cannot be edited or deleted. Office Staff can only recover pieces within their Office scope. Viewer access cannot create recoveries.
 
+The recovery screen also has a damaged-barcode reader beside the search form. It keeps trying a one-dimensional camera decode and accepts USB / Bluetooth scans or any readable code fragment. Fragment matching ignores spaces and hyphens, then marks results as exact, partial-code or record-detail matches before physical verification and replacement printing.
+
+`Office Manager` is an operational manager role with access to all factory, artisan, warehouse, despatch, barcode-recovery and Office panels and actions. It can manage company, product, artisan and workspace settings. Staff account and role administration remains Admin-only.
+
 Apply the `barcode_recovery` migration before deploying the feature. Run the integration suite against a configured database with `node --env-file=.env scripts/test-barcode-recovery.mjs` (use your local environment filename). It exercises search, permissions, replacements, retries, incorrect scans, pending intake, unidentified reports and immutable history inside one rolled-back transaction.

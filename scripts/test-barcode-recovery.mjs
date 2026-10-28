@@ -70,8 +70,11 @@ try {
     check((await search('Admin', marker)).candidates.length === 3, 'Bill/company search includes stock and reserved labels');
     check((await search('Office Staff', marker)).candidates.length === 1, 'Office search excludes factory and pending labels');
     check((await search('Admin', '', { company })).candidates.length === 3, 'Company filter works without code');
+    check((await search('Admin', factory.code.replaceAll('-', '').slice(-5))).candidates.some(item => item.code === factory.code), 'Visible code fragment matches even without separators');
+    check((await search('Admin', '---')).candidates.length === 0, 'Punctuation-only input never matches every barcode');
     check((await search('Admin', 'no-match')).candidates.length === 0, 'Unknown text returns no candidates');
     check(!permitted('Viewer', 'recovery') && !permitted('Operator', 'recovery'), 'Read-only/unsupported staff cannot recover');
+    check(permitted('Office Manager', 'receipt') && permitted('Office Manager', 'officeReceive') && permitted('Office Manager', 'settings') && !permitted('Office Manager', 'user'), 'Office Manager has all operational access but cannot manage staff roles');
     await assert.rejects(run('recoveryStart', { ...verified(factory.code), verified: false }), /physically|physical/);
     await assert.rejects(run('recoveryStart', { ...verified(factory.code), evidence: 'same' }), /evidence/);
     await assert.rejects(run('recoveryStart', verified(factory.code), 'Office Staff'), /outside Office/);

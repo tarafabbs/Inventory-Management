@@ -16,18 +16,22 @@ export async function recoveryRead(db: LedgerDatabase, user: any, params: URLSea
     const company = params.get('company') || '', product = params.get('product') || '';
     if (q.length < 2 && !company && !product) return { candidates: [], hasMore: false };
     const matches = `(?='' OR p.company_id=?) AND (?='' OR p.product_id=?) AND
-      strpos(lower(concat_ws(' ',p.code,c.name,pr.name,pr.material,pr.color,pr.design,l.reference,l.number,l.received_at,a.name,p.holder)),lower(?))>0`;
+      (strpos(lower(concat_ws(' ',p.code,c.name,pr.name,pr.material,pr.color,pr.design,l.reference,l.number,l.received_at,a.name,p.holder)),lower(?))>0
+      OR (length(regexp_replace(lower(?),'[^a-z0-9]','','g'))>=2
+        AND strpos(regexp_replace(lower(p.code),'[^a-z0-9]','','g'),regexp_replace(lower(?),'[^a-z0-9]','','g'))>0))`;
     const columns = `p.id,p.code,p.company_id,p.product_id,p.lot_id,p.ownership,p.holder,p.condition,p.version,
       c.name AS company_name,pr.name AS product_name,pr.color,pr.design,pr.material,
       l.number AS lot_number,l.reference AS bill_number,l.received_at,a.name AS artisan_name`;
-    const args = [company, company, product, product, q];
+    const args = [company, company, product, product, q, q, q];
     const pending = office ? '' : `UNION ALL SELECT g.id,g.code,g.company_id,g.product_id,g.lot_id,g.ownership,
       'NOT_REGISTERED','PENDING_LABEL_CONFIRMATION',0,c.name,pr.name,pr.color,pr.design,pr.material,
       l.number,l.reference,l.received_at,NULL,'pending' FROM generated_labels g
       JOIN companies c ON c.id=g.company_id JOIN products pr ON pr.id=g.product_id JOIN lots l ON l.id=g.lot_id
       WHERE g.state='PENDING' AND NOT EXISTS(SELECT 1 FROM pieces p WHERE p.code=g.code)
       AND (?='' OR g.company_id=?) AND (?='' OR g.product_id=?)
-      AND strpos(lower(concat_ws(' ',g.code,c.name,pr.name,pr.material,pr.color,pr.design,l.reference,l.number,l.received_at)),lower(?))>0`;
+      AND (strpos(lower(concat_ws(' ',g.code,c.name,pr.name,pr.material,pr.color,pr.design,l.reference,l.number,l.received_at)),lower(?))>0
+      OR (length(regexp_replace(lower(?),'[^a-z0-9]','','g'))>=2
+        AND strpos(regexp_replace(lower(g.code),'[^a-z0-9]','','g'),regexp_replace(lower(?),'[^a-z0-9]','','g'))>0))`;
     const { results } = await db.prepare(`SELECT * FROM (SELECT ${columns},'piece' AS kind FROM pieces p
       JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id JOIN lots l ON l.id=p.lot_id
       LEFT JOIN artisans a ON a.id=p.artisan_id WHERE ${office ? officeScope : 'true'} AND ${matches}
