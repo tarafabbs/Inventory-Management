@@ -16,8 +16,9 @@ export async function officeOperation(ctx:any){
  }
 
  const quantity=Number(v.quantity),reference=clean(v.reference),receivedAt=clean(v.received_at),notes=clean(v.notes);
+ const referenceLabel=reference?`Bill / challan ${reference}`:'No bill / challan provided';
  if(!Number.isInteger(quantity)||quantity<1||quantity>400)throw fail('Use a whole quantity from 1 to 400.');
- if(!reference||reference.length>200)throw fail('Enter the outside vendor bill / challan number, under 200 characters.');
+ if(reference.length>200)throw fail('Keep the optional vendor bill / challan number under 200 characters.');
  if(!receivedAt||!Number.isFinite(Date.parse(receivedAt)))throw fail('Enter a valid office receipt date.');
  if(notes.length>2000)throw fail('Keep office entry notes under 2,000 characters.');
 
@@ -57,9 +58,9 @@ export async function officeOperation(ctx:any){
   const piece={id,code,company_id:company.id,product_id:product.id,lot_id:lotId,ownership:'EXTERNAL',journey:'OFFICE',holder:'OFFICE_PENDING',condition:'PENDING_LABEL_CONFIRMATION',label_confirmed_at:null,version:1,created_at:time,company_name:company.name,product_name:product.name,lot_number:number};
   rows.push(piece);
   add("INSERT INTO pieces(id,code,company_id,product_id,lot_id,ownership,journey,holder,condition,version,created_at) VALUES(?,?,?,?,?,'EXTERNAL','OFFICE','OFFICE_PENDING','PENDING_LABEL_CONFIRMATION',1,?)",id,code,company.id,product.id,lotId,time);
-  event(piece,'OFFICE_VENDOR_REGISTERED',null,piece,`Outside vendor bill ${reference}; label reserved for office attachment`);
+  event(piece,'OFFICE_VENDOR_REGISTERED',null,piece,`${referenceLabel}; label reserved for office attachment`);
  }
- const tx=transaction('OFFICE_VENDOR_INTAKE',null,`Outside vendor ${company.name} · Bill ${reference} · ${quantity} labels created`,rows);
- add('INSERT INTO print_jobs(id,codes,reason,actor,created_at,status,verified) VALUES(?,?,?,?,?,?,0)',uuid(),JSON.stringify(rows.map(p=>p.code)),`Office vendor intake · ${reference}`,actor,time,'REQUESTED');
+ const tx=transaction('OFFICE_VENDOR_INTAKE',null,`Outside vendor ${company.name} · ${referenceLabel} · ${quantity} labels created`,rows);
+ add('INSERT INTO print_jobs(id,codes,reason,actor,created_at,status,verified) VALUES(?,?,?,?,?,?,0)',uuid(),JSON.stringify(rows.map(p=>p.code)),`Office vendor intake · ${referenceLabel}`,actor,time,'REQUESTED');
  return {ok:true,id:tx,lotId,count:quantity,codes:rows.map(p=>p.code)};
 }

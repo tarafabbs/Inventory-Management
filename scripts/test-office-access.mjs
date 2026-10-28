@@ -35,11 +35,12 @@ try{
   check(!permitted('Office Staff','officeEntry')&&permitted('Office Staff','officeReceive'),'Office Staff keeps scan-only office operations');
   check(canManageUser('Office Manager',null,'Office Staff')&&canManageUser('Office Manager','Assistant Manager','Office Staff')&&!canManageUser('Office Manager','Admin','Office Staff')&&!canManageUser('Office Manager',null,'Supervisor'),'Office Manager can grant only the two subordinate office roles');
   const marker=id().replaceAll('-','').slice(0,8),prefix=('O'+id().replace(/[^a-f]/g,'').slice(0,5)).toUpperCase();
-  const created=await run(officeOperation,'officeNewEntry',{vendor_name:'Office Vendor '+marker,vendor_prefix:prefix,vendor_contact:'test',product_name:'Office Saree '+marker,material:'Cotton',color:'Blue',reference:'OFF-BILL-'+marker,received_at:time.slice(0,10),quantity:2,notes:'Rolled-back integration fixture'});
+  const created=await run(officeOperation,'officeNewEntry',{vendor_name:'Office Vendor '+marker,vendor_prefix:prefix,vendor_contact:'test',product_name:'Office Saree '+marker,material:'Cotton',color:'Blue',reference:'',received_at:time.slice(0,10),quantity:2,notes:'Rolled-back integration fixture'});
   check(created.codes.length===2&&new Set(created.codes).size===2,'Office New Entry creates unique permanent barcodes');
   let pieces=await tx`select * from inventory.pieces where lot_id=${created.lotId} order by code`;
   check(pieces.length===2&&pieces.every(p=>p.journey==='OFFICE'&&p.ownership==='EXTERNAL'&&p.holder==='OFFICE_PENDING'&&p.condition==='PENDING_LABEL_CONFIRMATION'&&!p.label_confirmed_at),'Outside-vendor barcodes remain pending and office-only until scanned');
-  check((await tx`select journey from inventory.lots where id=${created.lotId}`)[0].journey==='OFFICE','Office lot is permanently marked as an office journey');
+  const lot=(await tx`select journey,reference from inventory.lots where id=${created.lotId}`)[0];
+  check(lot.journey==='OFFICE'&&lot.reference==='','Office lot stays valid without a bill and is permanently marked as an office journey');
   check((await tx`select count(*)::int as n from inventory.print_jobs where codes=${JSON.stringify(created.codes)}`)[0].n===1,'Initial office label printing is audited');
   await run(officeOperation,'officeLabel',{id:pieces[0].id,version:pieces[0].version});
   await run(officeOperation,'officeLabel',{id:pieces[1].id,version:pieces[1].version});
