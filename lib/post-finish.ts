@@ -36,24 +36,26 @@ export async function postFinishOperation(ctx:any){
   reason=`Disputed product returned from ${p.company_name}: ${disputeReason}`;
  }
  if(op==='officeReceive'){
-  if(p.holder!=='OFFICE_PENDING'||p.condition!=='FINISHED'||p.ownership!=='OWN')throw fail('This TaraFabbs product is not awaiting Office Staff confirmation.',409);
+  if(p.journey==='OFFICE'||p.holder!=='OFFICE_PENDING'||p.condition!=='FINISHED'||p.ownership!=='OWN')throw fail('This TaraFabbs workshop product is not awaiting Office confirmation.',409);
   after={...p,holder:'OFFICE_STOCK',artisan_id:null,ground_staff_id:null};
   reason='Office Staff scanned and submitted the product into office inventory';
  }
  if(op==='officeSell'){
-  if(p.holder!=='OFFICE_STOCK'||p.condition!=='FINISHED'||p.ownership!=='OWN')throw fail('Only confirmed TaraFabbs office stock can be marked sold out.',409);
+  if(p.holder!=='OFFICE_STOCK'||p.condition!=='FINISHED'||(p.ownership!=='OWN'&&p.journey!=='OFFICE'))throw fail('Only confirmed office stock can be marked sold out.',409);
   after={...p,holder:'SOLD',artisan_id:null,ground_staff_id:null};
   reason='Office Staff scanned and marked the product Sold Out';
  }
  if(op==='officeReturn'){
-  if(p.holder!=='OFFICE_STOCK'||p.condition!=='FINISHED'||p.ownership!=='OWN')throw fail('Only confirmed office stock can be returned to the workshop as disputed.',409);
+  if(p.journey==='OFFICE')throw fail('Outside-vendor stock has an office-only journey and cannot enter workshop processing.',409);
+  if(p.holder!=='OFFICE_STOCK'||p.condition!=='FINISHED'||p.ownership!=='OWN')throw fail('Only confirmed TaraFabbs workshop stock can be returned as disputed.',409);
   if(v.disputed!==true)throw fail('Confirm that this office item is disputed.');
   if(!disputeReason)throw fail('Record why this office item is returning to the workshop.');
   after={...p,holder:'FACTORY_RETURN_PENDING',condition:'DISPUTED',artisan_id:null,ground_staff_id:null};
   reason=`Office dispute sent back to workshop; factory receipt pending: ${disputeReason}`;
  }
  if(op==='customerReturn'){
-  if(p.holder!=='SOLD'||p.condition!=='FINISHED'||p.ownership!=='OWN')throw fail('Only a sold TaraFabbs product can be returned from a customer as disputed.',409);
+  if(p.journey==='OFFICE')throw fail('Outside-vendor stock has an office-only journey and cannot enter workshop processing.',409);
+  if(p.holder!=='SOLD'||p.condition!=='FINISHED'||p.ownership!=='OWN')throw fail('Only a sold TaraFabbs workshop product can be returned as disputed.',409);
   if(v.disputed!==true)throw fail('Confirm that this is a disputed return from the customer.');
   if(!disputeReason)throw fail('Record why the customer returned this product.');
   after={...p,holder:'FACTORY_RETURN_PENDING',condition:'DISPUTED',artisan_id:null,ground_staff_id:null};

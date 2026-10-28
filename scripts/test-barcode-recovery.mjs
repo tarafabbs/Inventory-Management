@@ -12,7 +12,7 @@ async function load(path) {
   return import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 }
 const { recoveryRead, recoveryOperation } = await load('../lib/barcode-recovery.ts');
-const { permitted } = await load('../lib/rules.ts');
+const { permitted, canManageUser } = await load('../lib/rules.ts');
 const url = process.env.SUPABASE_DATABASE_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
 assert.ok(url, 'Set the database URL before running integration checks.');
 const sql = postgres(url, { max: 1, prepare: false, ssl: 'require', connect_timeout: 15 });
@@ -69,12 +69,16 @@ try {
     const search = (role, q, extra = {}) => recoveryRead(db, { role }, new URLSearchParams({ recovery: 'search', q, ...extra }));
     check((await search('Admin', marker)).candidates.length === 3, 'Bill/company search includes stock and reserved labels');
     check((await search('Office Staff', marker)).candidates.length === 1, 'Office search excludes factory and pending labels');
+    check((await search('Office Manager', marker)).candidates.length === 1, 'Office Manager recovery search is office-scoped');
     check((await search('Admin', '', { company })).candidates.length === 3, 'Company filter works without code');
     check((await search('Admin', factory.code.replaceAll('-', '').slice(-5))).candidates.some(item => item.code === factory.code), 'Visible code fragment matches even without separators');
     check((await search('Admin', '---')).candidates.length === 0, 'Punctuation-only input never matches every barcode');
     check((await search('Admin', 'no-match')).candidates.length === 0, 'Unknown text returns no candidates');
     check(!permitted('Viewer', 'recovery') && !permitted('Operator', 'recovery'), 'Read-only/unsupported staff cannot recover');
-    check(permitted('Office Manager', 'receipt') && permitted('Office Manager', 'officeReceive') && permitted('Office Manager', 'settings') && !permitted('Office Manager', 'user'), 'Office Manager has all operational access but cannot manage staff roles');
+    check(permitted('Office Manager', 'officeEntry') && permitted('Office Manager', 'officeReceive') && permitted('Office Manager', 'user') && !permitted('Office Manager', 'receipt') && !permitted('Office Manager', 'handoff') && !permitted('Office Manager', 'settings'), 'Office Manager is restricted to office work and office access control');
+    check(permitted('Assistant Manager', 'officeEntry') && permitted('Assistant Manager', 'officeSell') && !permitted('Assistant Manager', 'user') && !permitted('Assistant Manager', 'receipt'), 'Assistant Manager can operate office inventory but cannot manage access or workshop work');
+    check(!permitted('Office Staff', 'officeEntry') && permitted('Office Staff', 'officeReceive'), 'Office Staff keeps scanning access without Office New Entry authority');
+    check(canManageUser('Office Manager', null, 'Office Staff') && canManageUser('Office Manager', 'Assistant Manager', 'Office Staff') && !canManageUser('Office Manager', 'Admin', 'Office Staff') && !canManageUser('Office Manager', null, 'Supervisor'), 'Office Manager can grant only Office Staff and Assistant Manager access');
     await assert.rejects(run('recoveryStart', { ...verified(factory.code), verified: false }), /physically|physical/);
     await assert.rejects(run('recoveryStart', { ...verified(factory.code), evidence: 'same' }), /evidence/);
     await assert.rejects(run('recoveryStart', verified(factory.code), 'Office Staff'), /outside Office/);

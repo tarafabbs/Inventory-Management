@@ -1,6 +1,7 @@
 import type { LedgerDatabase } from './database';
 
 const officeHolders = ['OFFICE_PENDING', 'OFFICE_STOCK', 'SOLD', 'FACTORY_RETURN_PENDING'];
+const isOfficeRole = (role:string) => ['Office Staff','Assistant Manager','Office Manager'].includes(role);
 const fail = (message: string, status = 400) => Object.assign(new Error(message), { status });
 const required = (value: unknown, name: string, min = 3) => {
   if (typeof value !== 'string' || value.trim().length < min || value.trim().length > 2000)
@@ -10,7 +11,7 @@ const required = (value: unknown, name: string, min = 3) => {
 const officeScope = "p.holder IN ('OFFICE_PENDING','OFFICE_STOCK','SOLD','FACTORY_RETURN_PENDING')";
 
 export async function recoveryRead(db: LedgerDatabase, user: any, params: URLSearchParams) {
-  const office = user.role === 'Office Staff';
+  const office = isOfficeRole(user.role);
   if (params.get('recovery') === 'search') {
     const q = (params.get('q') || '').trim().slice(0, 150);
     const company = params.get('company') || '', product = params.get('product') || '';
@@ -51,7 +52,7 @@ export async function recoveryRead(db: LedgerDatabase, user: any, params: URLSea
 export async function recoveryOperation(ctx: any) {
   const { op, v, db, add, guard, event, actor, user, time, uuid } = ctx;
   if (!['recoveryReport', 'recoveryStart', 'recoveryPrint', 'recoveryConfirm', 'recoveryCancel'].includes(op)) return null;
-  const office = user.role === 'Office Staff';
+  const office = isOfficeRole(user.role);
   let record: any = null;
   if (v.id) {
     record = await db.prepare('SELECT * FROM barcode_recoveries WHERE id=?').bind(v.id).first();
