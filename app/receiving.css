@@ -7,3 +7,4 @@
 @media(max-width:760px){.missing-codes>div{grid-template-columns:1fr;padding:0 14px 14px}.missing-barcode-svg{height:78px}}
 .scanner-action-buttons{display:flex;gap:8px;align-items:center}.scanner-device.history-mode .scan-input{border-color:#8d75d6;background:#f8f5ff;box-shadow:0 0 0 3px #8d75d614}
 @media(max-width:760px){.scanner-action-buttons{display:grid;grid-template-columns:1fr 1fr}.scanner-action-buttons .btn{white-space:normal}}
+.missing-banner.complete{border-color:#b8dfcc;background:#effaf4;color:#347a5d}
