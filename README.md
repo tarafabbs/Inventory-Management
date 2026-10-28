@@ -40,3 +40,11 @@ npm run dev
 ```
 
 The application includes receipts, Code 128 labels, label confirmation, saved scan drafts, handoffs, partial inspected returns, inventory and artisan balances, stock counts, exceptions, linked reversals and adjustments, staff roles, and CSV/print exports.
+
+## Barcode recovery
+
+Barcode Recovery is available in Quick actions, the all-in-one scanner, Label center, Office and piece details. Staff can search valid registered pieces or pending labels by original code, bill, lot, company, product or artist. A replacement requires a reason, physical identification evidence and confirmation of an exact match. The original Code 128 value is reused; recovery never changes stock, custody, condition, intake confirmation or piece version.
+
+Recovery requests persist until attachment is confirmed by scanning the replacement, or cancelled with a reason. Printer retries stay under the same request. Unidentified physical items can be reported separately and matched later; they cannot generate labels or stock. Closed records cannot be edited or deleted. Office Staff can only recover pieces within their Office scope. Viewer access cannot create recoveries.
+
+Apply the `barcode_recovery` migration before deploying the feature. Run the integration suite against a configured database with `node --env-file=.env scripts/test-barcode-recovery.mjs` (use your local environment filename). It exercises search, permissions, replacements, retries, incorrect scans, pending intake, unidentified reports and immutable history inside one rolled-back transaction.

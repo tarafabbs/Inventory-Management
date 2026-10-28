@@ -7,6 +7,7 @@ type Queryable = Pick<SqlClient, "unsafe">;
 let client: SqlClient | undefined;
 
 const inventoryTables = [
+  "barcode_recoveries",
   "artisans",
   "companies",
   "exceptions",
