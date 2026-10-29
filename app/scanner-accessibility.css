@@ -1,0 +1,14 @@
+.scanner-device .scan-input:focus-within{border-color:#8f76d4;box-shadow:0 0 0 3px #8f76d41c}
+.scanner-device .scan-input input{flex:1;min-width:0}
+.scanner-clear-code{display:grid;place-items:center;flex:none;min-width:36px;min-height:38px;border:0;border-radius:7px;background:transparent;color:#82708c}
+.scanner-clear-code:hover{background:#eee7f6;color:#574366}
+.scanner-clear-code:focus-visible{outline:3px solid #bcaefa;outline-offset:2px}
+.scanner-input-hint{margin:8px 3px 0;color:#7c6e86;font-size:11px;line-height:1.55}
+.scanner-camera-frame{position:relative;width:min(100%,620px);margin:0 auto;border-radius:8px;overflow:hidden}
+.scanner-camera-frame video{width:100%;aspect-ratio:3/1}
+.scanner-camera-guide{position:absolute;inset:19% 8%;pointer-events:none;border:2px solid #ffffffa8;border-radius:6px;box-shadow:0 0 0 50px #17121f28}
+.scanner-camera-guide:after{content:'';position:absolute;left:4%;right:4%;top:50%;height:1px;background:#c4f0cfb0;box-shadow:0 0 7px #b5edc5}
+.scanner-camera-state{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:11px;color:#6e5d7a;font-size:11px}
+.scanner-camera-state>span{width:7px;height:7px;border-radius:50%;background:#b79a62;flex:none}
+.scanner-camera-state>span.ready{background:#419675}
+@media(max-width:760px){.scanner-device .scan-input input{font-size:16px}.scanner-device .scan-input>.btn,.scanner-clear-code{min-height:44px}.scanner-input-hint{font-size:11px}.scanner-camera-state{font-size:10px}.scanner-action-buttons .btn{justify-content:center}}

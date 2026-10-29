@@ -5,8 +5,9 @@ export async function intakeOperation(ctx:any){
  const {op,v,db,add,guard,event,move,transaction,user,actor,time,uuid,fail}=ctx;
  if(op==='updatePreparedReceipt'){
   if(!v.id||typeof v.id!=='string')throw fail('Choose a bill to edit.');
-  if(!v.reference?.trim())throw fail('Enter the bill / challan number.');
-  if(v.reference.trim().length>200)throw fail('Keep the bill / challan number under 200 characters.');
+  if(v.reference!=null&&typeof v.reference!=='string')throw fail('Enter a valid bill / challan number.');
+  const reference=(v.reference||'').trim();
+  if(reference.length>200)throw fail('Keep the bill / challan number under 200 characters.');
   if(!v.received_at||!Number.isFinite(Date.parse(v.received_at)))throw fail('Enter a valid arrival date.');
   if(typeof v.notes!=='string'||v.notes.length>2000)throw fail('Keep bill notes under 2,000 characters.');
   const quantity=Number(v.quantity);
@@ -29,7 +30,7 @@ export async function intakeOperation(ctx:any){
   guard("SELECT COUNT(*)=1 FROM lots WHERE id=? AND company_id=? AND product_id=? AND thanwala_id IS NOT DISTINCT FROM ? AND reference=? AND received_at=? AND stated=? AND accepted=? AND notes=? AND (SELECT COUNT(*) FROM pieces WHERE lot_id=?)=? AND (SELECT COUNT(*) FROM generated_labels WHERE lot_id=? AND state='PENDING')=?",lot.id,lot.company_id,lot.product_id,lot.thanwala_id||null,lot.reference,lot.received_at,lot.stated,lot.accepted,lot.notes,lot.id,registered,lot.id,oldPending);
   if(!lot.thanwala_id&&thanwala){add('UPDATE generated_labels SET thanwala_id=? WHERE lot_id=? AND thanwala_id IS NULL',thanwala.id,lot.id);add('UPDATE pieces SET thanwala_id=? WHERE lot_id=? AND thanwala_id IS NULL',thanwala.id,lot.id);}
   add("UPDATE generated_labels SET state='VOIDED' WHERE lot_id=? AND state='PENDING'",lot.id);
-  add('UPDATE lots SET company_id=?,product_id=?,ownership=?,thanwala_id=?,reference=?,received_at=?,stated=?,accepted=?,notes=? WHERE id=?',c.id,product.id,c.ownership,thanwala?.id||null,v.reference.trim(),v.received_at,quantity,quantity,v.notes.trim(),lot.id);
+  add('UPDATE lots SET company_id=?,product_id=?,ownership=?,thanwala_id=?,reference=?,received_at=?,stated=?,accepted=?,notes=? WHERE id=?',c.id,product.id,c.ownership,thanwala?.id||null,reference,v.received_at,quantity,quantity,v.notes.trim(),lot.id);
   const replacementCount=quantity-registered;
   if(replacementCount){
    add('UPDATE companies SET sequence=sequence+? WHERE id=?',replacementCount,c.id);
@@ -38,7 +39,9 @@ export async function intakeOperation(ctx:any){
   return {ok:true,id:lot.id,count:replacementCount,registered,regenerated:replacementCount>0};
  }
  if(op==='prepareReceipt'){
-  if(!v.reference?.trim())throw fail('Enter the bill / challan number.');
+  if(v.reference!=null&&typeof v.reference!=='string')throw fail('Enter a valid bill / challan number.');
+  const reference=(v.reference||'').trim();
+  if(reference.length>200)throw fail('Keep the bill / challan number under 200 characters.');
   if(!v.received_at||!Number.isFinite(Date.parse(v.received_at)))throw fail('Enter a valid arrival date.');
   if(!Array.isArray(v.items)||!v.items.length||v.items.length>20)throw fail('Add 1–20 product lines.');
   const count=v.items.reduce((n:number,i:any)=>n+Number(i.quantity),0);
@@ -56,7 +59,7 @@ export async function intakeOperation(ctx:any){
   for(const item of v.items){
    const product=await db.prepare('SELECT * FROM products WHERE id=? AND active=1').bind(item.product_id).first();if(!product)throw fail('Choose an active product for every line.');
    const id=uuid(),number=`LOT-${time.slice(0,4)}-${id.slice(0,6).toUpperCase()}`;ids.push(id);
-   add('INSERT INTO lots(id,number,company_id,product_id,ownership,thanwala_id,received_at,reference,stated,accepted,damaged,rejected,reason,notes,status,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,0,?,?,?, ?,?)',id,number,c.id,product.id,c.ownership,thanwala?.id||null,v.received_at,v.reference.trim(),item.quantity,item.quantity,'',v.notes||'','PREPARED',actor,time);
+   add('INSERT INTO lots(id,number,company_id,product_id,ownership,thanwala_id,received_at,reference,stated,accepted,damaged,rejected,reason,notes,status,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,0,?,?,?, ?,?)',id,number,c.id,product.id,c.ownership,thanwala?.id||null,v.received_at,reference,item.quantity,item.quantity,'',v.notes||'','PREPARED',actor,time);
    add('UPDATE companies SET sequence=sequence+? WHERE id=?',item.quantity,c.id);
    for(let i=0;i<item.quantity;i++)add("INSERT INTO generated_labels(id,code,company_id,product_id,lot_id,ownership,thanwala_id,state,created_at) SELECT ?,prefix||'-'||lpad((sequence-?+?)::text,6,'0'),?,?,?,?,?,'PENDING',? FROM companies WHERE id=?",uuid(),item.quantity,i+1,c.id,product.id,id,c.ownership,thanwala?.id||null,time,c.id);
   }

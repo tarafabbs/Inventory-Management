@@ -1,0 +1,11 @@
+.office-table-search{padding:12px 20px;border-bottom:1px solid var(--line)}
+.office-table-search>label{display:flex;align-items:center;gap:8px;max-width:440px;border:1px solid #dedbe7;border-radius:8px;padding:0 10px;color:#74677e;background:#fff}
+.office-table-search input{border:0;box-shadow:none;flex:1;min-width:0;padding:10px 0;background:transparent}
+.office-table-search input:focus{box-shadow:none}
+.office-table-search>label:focus-within{outline:2px solid #a194e0;outline-offset:2px}
+.office-table-empty{padding:30px 20px;text-align:center;color:var(--muted)}
+.office-table-empty .text-btn{margin-top:8px}
+.office-table-pages{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 18px;border-top:1px solid var(--line);font-size:11px;color:#74677e}
+.office-table-pages>div{display:flex;align-items:center;gap:10px}
+.office-table-pages .icon-btn{width:40px;height:40px}
+@media(max-width:760px){.office-table-search{padding:12px 14px}.office-table-search>label{max-width:none}.office-table-pages{padding:8px 12px}.office-table-pages .icon-btn{width:44px;height:44px}}
