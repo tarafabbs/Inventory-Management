@@ -1,6 +1,8 @@
 // Barcode reservations are documents; only an inspected scan creates inventory.
+import {canEditPreparedReceipt} from './rules';
+
 export async function intakeOperation(ctx:any){
- const {op,v,db,add,guard,event,move,transaction,actor,time,uuid,fail}=ctx;
+ const {op,v,db,add,guard,event,move,transaction,user,actor,time,uuid,fail}=ctx;
  if(op==='updatePreparedReceipt'){
   if(!v.id||typeof v.id!=='string')throw fail('Choose a bill to edit.');
   if(!v.reference?.trim())throw fail('Enter the bill / challan number.');
@@ -11,6 +13,7 @@ export async function intakeOperation(ctx:any){
   if(!Number.isInteger(quantity)||quantity<1||quantity>400)throw fail('Use a whole quantity from 1 to 400.');
   const lot=await db.prepare("SELECT * FROM lots WHERE id=? AND status<>'DRAFT'").bind(v.id).first();
   if(!lot)throw fail('This bill could not be found.',404);
+  if(!canEditPreparedReceipt(user.role,lot.created_at,Date.parse(time)))throw fail('Workshop staff can edit a New Entry only within 24 hours. Ask an Admin to make an older correction.',403);
   const registeredRow=await db.prepare('SELECT COUNT(*)::int AS n FROM pieces WHERE lot_id=?').bind(lot.id).first();
   const pendingRow=await db.prepare("SELECT COUNT(*)::int AS n FROM generated_labels WHERE lot_id=? AND state='PENDING'").bind(lot.id).first();
   const registered=Number(registeredRow?.n||0),oldPending=Number(pendingRow?.n||0);
