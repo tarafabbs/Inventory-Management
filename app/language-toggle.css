@@ -1,0 +1,9 @@
+.language-toggle-host{display:flex;align-items:center}
+.language-toggle{display:flex;align-items:center;gap:2px;padding:3px;border:1px solid #e4e0e9;border-radius:8px;background:#faf8fc;color:#8d8195;white-space:nowrap}
+.language-toggle>svg{margin:0 4px 0 3px}
+.language-toggle button{border:0;background:transparent;border-radius:5px;padding:4px 7px;min-height:25px;font-size:9px;font-weight:700;color:#978a9f}
+.language-toggle button.active{background:#7b65cb;color:#fff;box-shadow:0 1px 3px #5e469329}
+body[data-language=bn]{font-family:'Noto Sans Bengali','Hind Siliguri','Kohinoor Bangla','Bangla Sangam MN','DM Sans',sans-serif}
+body[data-language=bn] h1,body[data-language=bn] h2,body[data-language=bn] h3{font-family:'Noto Sans Bengali','Hind Siliguri','Kohinoor Bangla','Bangla Sangam MN','Manrope',sans-serif;letter-spacing:0}
+body[data-language=bn] .nav-label,body[data-language=bn] .eyebrow{letter-spacing:.5px}
+@media(max-width:760px){.language-toggle{padding:2px}.language-toggle>svg{display:none}.language-toggle button{padding:4px 6px;font-size:8px}.mobile-staff-restricted .topbar{gap:8px}.mobile-staff-restricted .language-toggle-host{margin-left:auto}}
