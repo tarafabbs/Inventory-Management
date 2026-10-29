@@ -24,6 +24,7 @@ const inventoryTables = [
   "requests",
   "settings",
   "stock_checks",
+  "thanwalas",
   "transaction_items",
   "transactions",
   "users",
