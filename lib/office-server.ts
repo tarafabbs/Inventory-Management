@@ -1,8 +1,54 @@
+import {canEditOfficeEntry,permitted} from './rules';
 const clean = (value:unknown) => String(value||'').trim();
 
 export async function officeOperation(ctx:any){
- const {op,v,db,add,guard,event,move,transaction,actor,time,uuid,fail}=ctx;
- if(!['officeNewEntry','officeLabel'].includes(op))return null;
+ const {op,v,db,add,guard,event,move,transaction,actor,time,uuid,fail,user}=ctx;
+ if(!['officeNewEntry','officeLabel','officeEntryEdit','officeMasterEdit'].includes(op))return null;
+
+ if(op==='officeEntryEdit'){
+  if(!permitted(user?.role,'officeEdit'))throw fail('Your role cannot edit Office New Entries.',403);
+  const lot=await db.prepare("SELECT * FROM lots WHERE id=? AND journey='OFFICE'").bind(v.id||'').first();
+  if(!lot)throw fail('Choose an Office New Entry. Workshop entries cannot be edited here.',404);
+  if(!canEditOfficeEntry(user.role,lot.created_at,Date.parse(time)))throw fail('The 24-hour Office New Entry edit window has closed.',403);
+  if(!v.expected||['reference','received_at','notes'].some(field=>String(v.expected[field]??'')!==String(lot[field]??'')))throw fail('This Office New Entry changed while you were editing. Reopen it and review the latest details.',409);
+  const reference=clean(v.reference),receivedAt=clean(v.received_at),notes=clean(v.notes),reason=clean(v.reason);
+  if(reference.length>200)throw fail('Keep the optional vendor bill / challan number under 200 characters.');
+  if(!receivedAt||!Number.isFinite(Date.parse(receivedAt)))throw fail('Enter a valid office receipt date.');
+  if(notes.length>2000)throw fail('Keep office entry notes under 2,000 characters.');
+  if(reason.length<3||reason.length>2000)throw fail('Explain the Office entry correction in 3–2000 characters.');
+  for(const field of ['company_id','product_id','ownership','journey','stated','accepted','quantity'])if(v[field]!=null&&String(v[field])!==String(lot[field]))throw fail('This correction can change only the optional bill number, receipt date and notes. Barcode quantities and source remain fixed.');
+  if(reference===lot.reference&&receivedAt===lot.received_at&&notes===lot.notes)throw fail('Change a bill detail before saving a correction.');
+  add("SELECT id FROM lots WHERE id=? AND journey='OFFICE' FOR UPDATE",lot.id);
+  guard("SELECT COUNT(*)=1 FROM lots WHERE id=? AND journey='OFFICE' AND reference=? AND received_at=? AND notes=?",lot.id,lot.reference,lot.received_at,lot.notes);
+  add("UPDATE lots SET reference=?,received_at=?,notes=? WHERE id=? AND journey='OFFICE'",reference,receivedAt,notes,lot.id);
+  const before={reference:lot.reference,received_at:lot.received_at,notes:lot.notes},after={reference,received_at:receivedAt,notes};
+  const tx=transaction('OFFICE_ENTRY_EDIT',null,`Office entry ${lot.number} corrected: ${reason}`,[{entity_type:'office_entry',lot_id:lot.id,lot_number:lot.number,before,after}]);
+  return {ok:true,id:tx,lotId:lot.id};
+ }
+
+ if(op==='officeMasterEdit'){
+  if(!permitted(user?.role,'officeMaster'))throw fail('Your role cannot edit office vendors or products.',403);
+  const table=v.kind==='vendors'?'companies':v.kind==='products'?'products':'';
+  if(!table||!v.id)throw fail('Choose an office-only vendor or product to edit.');
+  const record=await db.prepare(`SELECT * FROM ${table} WHERE id=? AND office_only=1`).bind(v.id).first();
+  if(!record)throw fail('This record belongs outside Office access.',403);
+  for(const field of ['prefix','ownership','office_only','active'])if(v[field]!=null&&String(v[field])!==String(record[field]))throw fail('Office correction cannot change barcode prefixes, ownership, access scope or archive status.');
+  const fields=table==='companies'?['name','contact']:['name','material','weave','color','design'];
+  if(!v.expected||fields.some(field=>String(v.expected[field]??'')!==String(record[field]??'')))throw fail('This office record changed while you were editing. Reselect it and review the latest details.',409);
+  const after:Record<string,string>={},before:Record<string,string>={};
+  for(const field of fields){after[field]=clean(v[field]);before[field]=record[field]||'';if(after[field].length>(field==='name'?200:2000))throw fail(`Keep ${field} under ${field==='name'?200:2000} characters.`)}
+  const reason=clean(v.reason);
+  if(!after.name)throw fail('A name is required.');
+  if(reason.length<3||reason.length>2000)throw fail('Explain the office record correction in 3–2000 characters.');
+  if(fields.every(field=>after[field]===before[field]))throw fail('Change a record detail before saving a correction.');
+  const duplicate=await db.prepare(`SELECT id FROM ${table} WHERE lower(name)=lower(?) AND id<>?${table==='products'?' AND office_only=1':''}`).bind(after.name,record.id).first();
+  if(duplicate)throw fail('This name already exists. Use a distinct name for this office record.',409);
+  add(`SELECT id FROM ${table} WHERE id=? AND office_only=1 FOR UPDATE`,record.id);
+  guard(`SELECT COUNT(*)=1 FROM ${table} WHERE id=? AND office_only=1 AND ${fields.map(field=>`${field} IS NOT DISTINCT FROM ?`).join(' AND ')}`,record.id,...fields.map(field=>record[field]));
+  add(`UPDATE ${table} SET ${fields.map(field=>`${field}=?`).join(',')} WHERE id=? AND office_only=1`,...fields.map(field=>after[field]),record.id);
+  const tx=transaction('OFFICE_MASTER_EDIT',null,`Office ${v.kind==='vendors'?'vendor':'product'} ${before.name} corrected: ${reason}`,[{entity_type:v.kind,record_id:record.id,before,after}]);
+  return {ok:true,id:tx,recordId:record.id};
+ }
 
  if(op==='officeLabel'){
   const p:any=await db.prepare('SELECT p.*,c.name AS company_name,pr.name AS product_name,l.number AS lot_number FROM pieces p JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id JOIN lots l ON l.id=p.lot_id WHERE p.id=?').bind(v.id||'').first();

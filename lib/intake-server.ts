@@ -24,6 +24,7 @@ export async function intakeOperation(ctx:any){
   const product=await db.prepare('SELECT * FROM products WHERE id=?').bind(v.product_id).first();
   if(!c||(!c.active&&c.id!==lot.company_id))throw fail('Choose an active company, association or own brand.');
   if(!product||(!product.active&&product.id!==lot.product_id))throw fail('Choose an active product.');
+  if(c.office_only===1||product.office_only===1)throw fail('Office-only vendors and products must use Office New Entry.');
   const thanwala=c.ownership==='OWN'?await db.prepare('SELECT * FROM thanwalas WHERE id=?').bind(v.thanwala_id).first():null;
   if(c.ownership==='OWN'&&(!thanwala||(!thanwala.active&&thanwala.id!==lot.thanwala_id)))throw fail('Choose an active Thanwala for TaraFabbs Own Product.');
   if(c.ownership==='EXTERNAL'&&v.thanwala_id)throw fail('Thanwala applies only to TaraFabbs Own Product.');
@@ -47,6 +48,7 @@ export async function intakeOperation(ctx:any){
   const count=v.items.reduce((n:number,i:any)=>n+Number(i.quantity),0);
   if(v.items.some((i:any)=>!Number.isInteger(i.quantity)||i.quantity<1)||count>400)throw fail('Use whole quantities, up to 400 labels per bill.');
   const c=await db.prepare('SELECT * FROM companies WHERE id=? AND active=1').bind(v.company_id).first();
+  if(c?.office_only===1)throw fail('Office-only vendors and products must use Office New Entry.');
   if(!c)throw fail('Choose an active company, association or own brand.');
   if(v.source_type&&!['OWN','EXTERNAL'].includes(v.source_type))throw fail('Choose Jobwork Company or TaraFabbs Own Product.');
   if(v.source_type&&c.ownership!==v.source_type)throw fail('The selected source does not match the New Entry source type.');
@@ -58,6 +60,7 @@ export async function intakeOperation(ctx:any){
   const ids=[];
   for(const item of v.items){
    const product=await db.prepare('SELECT * FROM products WHERE id=? AND active=1').bind(item.product_id).first();if(!product)throw fail('Choose an active product for every line.');
+   if(product.office_only===1)throw fail('Office-only vendors and products must use Office New Entry.');
    const id=uuid(),number=`LOT-${time.slice(0,4)}-${id.slice(0,6).toUpperCase()}`;ids.push(id);
    add('INSERT INTO lots(id,number,company_id,product_id,ownership,thanwala_id,received_at,reference,stated,accepted,damaged,rejected,reason,notes,status,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,0,0,?,?,?, ?,?)',id,number,c.id,product.id,c.ownership,thanwala?.id||null,v.received_at,reference,item.quantity,item.quantity,'',v.notes||'','PREPARED',actor,time);
    add('UPDATE companies SET sequence=sequence+? WHERE id=?',item.quantity,c.id);
@@ -73,9 +76,9 @@ export async function intakeOperation(ctx:any){
    if(!['OK','DAMAGED'].includes(line.outcome))throw fail('Check Condition OK or Condition Damaged before inventory entry.');
    if(line.outcome==='DAMAGED'&&!line.reason?.trim())throw fail('Describe why this saree is damaged.');
    const label=await db.prepare('SELECT g.*,c.name AS company_name,p.name AS product_name,l.number AS lot_number FROM generated_labels g JOIN companies c ON c.id=g.company_id JOIN products p ON p.id=g.product_id JOIN lots l ON l.id=g.lot_id WHERE g.id=?').bind(line.id).first();
-   const legacy=label?null:await db.prepare("SELECT g.*,c.name AS company_name,p.name AS product_name,l.number AS lot_number FROM pieces g JOIN companies c ON c.id=g.company_id JOIN products p ON p.id=g.product_id JOIN lots l ON l.id=g.lot_id WHERE g.id=? AND g.condition='PENDING_LABEL_CONFIRMATION'").bind(line.id).first();
-   if((!label&&!legacy)||(label&&label.state!=='PENDING'))throw fail('This barcode is unknown or already entered.',409);
-   const p=label||legacy;if(v.lot_id&&p.lot_id!==v.lot_id)throw fail('This barcode belongs to a different bill / lot.');
+   const legacy=label?.state==='PENDING'?null:await db.prepare("SELECT g.*,c.name AS company_name,p.name AS product_name,l.number AS lot_number FROM pieces g JOIN companies c ON c.id=g.company_id JOIN products p ON p.id=g.product_id JOIN lots l ON l.id=g.lot_id WHERE g.id=? AND g.condition='PENDING_LABEL_CONFIRMATION'").bind(line.id).first();
+   if(!legacy&&(!label||label.state!=='PENDING'))throw fail('This barcode is unknown or already entered.',409);
+   const p=legacy||label;if(v.lot_id&&p.lot_id!==v.lot_id)throw fail('This barcode belongs to a different bill / lot.');
    staged.push({p,line,legacy});
   }
   const tx=transaction('INTAKE',null,v.reason||'Physical label attached and condition checked',staged.map(({p,line}:any)=>({...p,outcome:line.outcome,inspection_reason:line.reason||''})));
@@ -83,8 +86,8 @@ export async function intakeOperation(ctx:any){
    const condition=line.outcome==='OK'?'AVAILABLE':'DAMAGED';
    if(legacy){guard("SELECT COUNT(*)=1 FROM pieces WHERE id=? AND version=? AND condition='PENDING_LABEL_CONFIRMATION'",p.id,p.version);add('UPDATE pieces SET condition=?,label_confirmed_at=?,version=version+1 WHERE id=?',condition,time,p.id);}
    else {guard("SELECT COUNT(*)=1 FROM generated_labels WHERE id=? AND state='PENDING'",p.id);add("INSERT INTO pieces(id,code,company_id,product_id,lot_id,ownership,thanwala_id,holder,condition,label_confirmed_at,version,created_at) VALUES(?,?,?,?,?,?,?,'IN_HOUSE',?,?,1,?)",p.id,p.code,p.company_id,p.product_id,p.lot_id,p.ownership,p.thanwala_id||null,condition,time,time);add('UPDATE generated_labels SET state=?,registered_at=? WHERE id=?',condition,time,p.id);}
-   event(p,'INTAKE',legacy?p:null,{...p,holder:'IN_HOUSE',artisan_id:null,condition,label_confirmed_at:time},line.reason||'Condition OK; attached barcode scanned',tx);
-   add('INSERT INTO transaction_items(id,transaction_id,piece_id,before_state,after_state) VALUES(?,?,?,?,?)',uuid(),tx,p.id,JSON.stringify(legacy||null),JSON.stringify({...p,holder:'IN_HOUSE',condition,label_confirmed_at:time}));
+   event(p,'INTAKE',legacy?p:null,{...p,holder:'IN_HOUSE',artisan_id:null,condition,label_confirmed_at:time,version:legacy?p.version+1:1},line.reason||'Condition OK; attached barcode scanned',tx);
+   add('INSERT INTO transaction_items(id,transaction_id,piece_id,before_state,after_state) VALUES(?,?,?,?,?)',uuid(),tx,p.id,JSON.stringify(legacy||null),JSON.stringify({...p,holder:'IN_HOUSE',artisan_id:null,condition,label_confirmed_at:time,version:legacy?p.version+1:1}));
   }
   return {ok:true,id:tx,count:staged.length};
  }
@@ -97,7 +100,7 @@ export async function intakeOperation(ctx:any){
    if(p.holder==='FACTORY_RETURN_PENDING')throw fail('Factory Staff must receive this office/customer return before another movement.',409);
    if(p.holder==='RETURNED_TO_SOURCE'||!['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition))throw fail('Only damaged, disputed or rework pieces can be returned to source.',409);
    if(p.ownership==='OWN'){
-    if(!p.thanwala_id)throw fail('This older Own Product has no Thanwala saved. Ask Admin or Supervisor to edit its New Entry first.');
+    if(!p.thanwala_id)throw fail('This Own Product has no purchase Thanwala saved. Use Identify purchase Thanwala from its scan actions or piece details, then scan it again.');
     if(!v.thanwala_id||p.thanwala_id!==v.thanwala_id)throw fail('Scan only pieces purchased from the selected Thanwala.');
    }else if(!v.company_id||p.company_id!==v.company_id)throw fail('Scan only pieces belonging to the selected source company.');
   }else if(!['WITH_ARTISAN','IN_HOUSE'].includes(p.holder)||!p.label_confirmed_at||p.condition==='DISPUTED')throw fail('This piece cannot be disputed again in its current state.');

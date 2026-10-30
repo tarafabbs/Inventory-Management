@@ -55,4 +55,18 @@ The recovery screen also has a damaged-barcode reader beside the search form. It
 
 Office New Entry creates office-only vendors/products, a permanent `OFFICE` journey, and one barcode per accepted product. Those labels remain pending until attached and scanned through Confirm New Office Label. TaraFabbs workshop products continue to enter through Factory Finished Goods Received. The Office panel shows only current office inventory, sold products, eligible office returns, and their office movement history. An outside-vendor `OFFICE` journey is enforced by the database and cannot enter workshop or artisan processing.
 
+## Role self-service
+
+Workshop staff share New Entry, label printing/activation, create-only company/product/Thanwala/artisan records, barcode recovery, stock counting and exception reporting. Receiving, Issue and Inspection retain their respective receiving, artist issue and inspection duties. Supervisor manages workshop master records and documented stock corrections. Creating a prerequisite does not grant permission to edit/archive shared masters.
+
+Office Staff can confirm attached outside-vendor labels as well as receive workshop goods, sell and process eligible office returns. Assistant Manager and Office Manager can correct office-only vendor/product metadata and optional bill/date/notes on office entries within 24 hours. Office Manager continues to manage only Office Staff and Assistant Manager access. Office records cannot be edited through workshop master or intake operations.
+
+Every profile includes My access; Admin Settings includes a role selector showing actual permissions. Ordinary staff may undo their own eligible scan or artisan transaction within 20 minutes when the current version still matches. Office undo never restores workshop custody. First intake undo preserves the permanent barcode and restores pending-label status for inspection again. Supervisor can reverse an unchanged artisan transaction after the staff window. Entry edits retain the 24-hour staff/Admin lifetime policy; unrestricted roles, settings and Data Control remain Admin-only.
+
+Office Manager and Assistant Manager can also correct eligible office-team label, receipt and sale scans within the same 20-minute window. They cannot undo a workshop Send to Office or restore workshop custody.
+
+Legacy Own Product lots missing a purchase Thanwala can be identified once by workshop staff using verified purchase evidence. Existing saved sources and barcode identity cannot be replaced by this workflow. The assignment, office corrections and scan reversals all retain dated audit records.
+
+Run `node scripts/test-role-access.mjs` and `node scripts/test-workshop-self-service.mjs` for local permission/handler checks without database writes.
+
 Apply all migrations before deploying. Run the integration suites against a configured database with `node --env-file=.env scripts/test-barcode-recovery.mjs` and `node --env-file=.env scripts/test-office-access.mjs` (use your local environment filename). They exercise recovery, office permissions, outside-vendor label activation, sales, workshop isolation and immutable history inside rolled-back transactions.
