@@ -1,6 +1,7 @@
 // Code reservations are documents; only a physically checked manual submission creates inventory.
 import {canEditPreparedReceipt} from './rules';
 
+const DEFAULT_OWN_COMPANY_ID='system-tarafabbs-own';
 export async function intakeOperation(ctx:any){
  const {op,v,db,add,guard,event,move,transaction,user,actor,time,uuid,fail}=ctx;
  if(op==='updatePreparedReceipt'){
@@ -52,7 +53,8 @@ export async function intakeOperation(ctx:any){
   if(!Array.isArray(v.items)||!v.items.length||v.items.length>20)throw fail('Add 1–20 product lines.');
   const count=v.items.reduce((n:number,i:any)=>n+Number(i.quantity),0);
   if(v.items.some((i:any)=>!Number.isInteger(i.quantity)||i.quantity<1)||count>400)throw fail('Use whole quantities, up to 400 handwritten codes per bill.');
-  const c=await db.prepare('SELECT * FROM companies WHERE id=? AND active=1').bind(v.company_id).first();
+  const companyId=v.source_type==='OWN'&&!v.company_id?DEFAULT_OWN_COMPANY_ID:v.company_id;
+  const c=await db.prepare('SELECT * FROM companies WHERE id=? AND active=1').bind(companyId).first();
   if(c?.office_only===1)throw fail('Office-only vendors and products must use Office New Entry.');
   if(!c)throw fail('Choose an active company, association or own brand.');
   if(v.source_type&&!['OWN','EXTERNAL'].includes(v.source_type))throw fail('Choose Jobwork Company or TaraFabbs Own Product.');

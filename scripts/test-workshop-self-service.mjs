@@ -121,4 +121,23 @@ check(JSON.parse(freshItem.args[3])===null&&JSON.parse(freshItem.args[4]).versio
 check(fresh.statements.some(write=>write.query==='UPDATE generated_labels SET state=?,registered_at=? WHERE id=?'&&write.args[0]==='AVAILABLE'),'First intake marks the reservation entered');
 await assert.rejects(intakeOperation(intakeContext({legacyExists:false})),/unknown or already entered/);
 checks++;
+
+function prepareReceiptContext(){
+ const record=recorder(),fallback={id:'system-tarafabbs-own',name:'TaraFabbs Own Product',ownership:'OWN',active:1,office_only:0},product={id:'product-1',active:1,office_only:0};
+ const db={prepare(query){return{bind(...args){record.queries.push({query,args});return{
+  async first(){
+   if(query.startsWith('SELECT * FROM companies'))return args[0]===fallback.id?fallback:null;
+   if(query.startsWith('SELECT * FROM thanwalas'))return args[0]===source.id?source:null;
+   if(query.startsWith('SELECT * FROM products'))return args[0]===product.id?product:null;
+   throw Error('Unexpected prepared-receipt query: '+query);
+  },
+  async all(){assert.equal(query,'SELECT inventory.next_piece_code() AS code FROM generate_series(1,?)');return{results:[{code:'B7K3'}]};},
+ }}}}};
+ return {...record,db,op:'prepareReceipt',v:{company_id:'',source_type:'OWN',thanwala_id:source.id,reference:'',received_at:'2026-10-30',notes:'',items:[{product_id:product.id,quantity:1}]}};
+}
+const optionalBrand=prepareReceiptContext();
+const prepared=await intakeOperation(optionalBrand);
+check(prepared.ok&&prepared.count===1,'An Own Product can be prepared without selecting an own brand or purchasing company');
+check(optionalBrand.queries.some(query=>query.query.startsWith('SELECT * FROM companies')&&query.args[0]==='system-tarafabbs-own'),'A blank optional brand resolves to the protected internal TaraFabbs source');
+check(optionalBrand.statements.some(write=>write.query.startsWith('INSERT INTO lots')&&write.args[2]==='system-tarafabbs-own'),'The internal source keeps the prepared lot relationally complete');
 console.log(`PASS: ${checks} workshop source-identification and intake-recovery assertions. No database writes.`);
