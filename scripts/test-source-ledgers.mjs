@@ -23,20 +23,20 @@ const data={
   {id:'lot-draft',company_id:'company-jobwork',product_id:'product-silk',accepted:99,status:'DRAFT'},
   {id:'lot-own',company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton',accepted:7,status:'CONFIRMED'}
  ],
- generatedLabels:[line('EJL-000004',{state:'PENDING',holder:null,condition:'PENDING_LABEL_CONFIRMATION'})],
+ generatedLabels:[line('B2C6',{state:'PENDING',holder:null,condition:'PENDING_LABEL_CONFIRMATION'})],
  pieces:[
-  line('EJL-000001',{holder:'WITH_ARTISAN',condition:'WITH_ARTISAN',artisan_id:'artisan-one'}),
-  line('EJL-000002',{holder:'JOBWORK_COMPANY',condition:'FINISHED'}),
-  line('EJL-000003',{condition:'DISPUTED'}),
-  line('IMS-000001',{company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton',lot_id:'lot-own'}),
-  line('IMS-000002',{company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton',lot_id:'lot-own',holder:'RETURNED_TO_SOURCE',condition:'DAMAGED'})
+  line('B2C3',{holder:'WITH_ARTISAN',condition:'WITH_ARTISAN',artisan_id:'artisan-one'}),
+  line('B2C4',{holder:'JOBWORK_COMPANY',condition:'FINISHED'}),
+  line('B2C5',{condition:'DISPUTED'}),
+  line('M2N3',{company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton',lot_id:'lot-own'}),
+  line('M2N4',{company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton',lot_id:'lot-own',holder:'RETURNED_TO_SOURCE',condition:'DAMAGED'})
  ],
  transactions:[
-  transaction('TX-DESPATCH','JOBWORK_DISPATCH',[line('EJL-000002',{holder:'JOBWORK_COMPANY',condition:'FINISHED'})]),
-  transaction('TX-DISPUTE','JOBWORK_DISPUTE_RETURN',[line('EJL-000003',{condition:'DISPUTED'})]),
-  transaction('TX-THANWALA-RETURN','SUPPLIER_RETURN',[line('IMS-000002',{company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton',holder:'RETURNED_TO_SOURCE'})]),
-  transaction('TX-OFFICE','OFFICE_SEND',[line('IMS-000001',{company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton'})]),
-  transaction('TX-VOID','JOBWORK_DISPATCH',[line('EJL-000002',{holder:'JOBWORK_COMPANY'})],{status:'VOIDED_BY_REVERSAL'})
+  transaction('TX-DESPATCH','JOBWORK_DISPATCH',[line('B2C4',{holder:'JOBWORK_COMPANY',condition:'FINISHED'})]),
+  transaction('TX-DISPUTE','JOBWORK_DISPUTE_RETURN',[line('B2C5',{condition:'DISPUTED'})]),
+  transaction('TX-THANWALA-RETURN','SUPPLIER_RETURN',[line('M2N4',{company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton',holder:'RETURNED_TO_SOURCE'})]),
+  transaction('TX-OFFICE','OFFICE_SEND',[line('M2N3',{company_id:'company-own',thanwala_id:'thanwala-one',product_id:'product-cotton'})]),
+  transaction('TX-VOID','JOBWORK_DISPATCH',[line('B2C4',{holder:'JOBWORK_COMPANY'})],{status:'VOIDED_BY_REVERSAL'})
  ]
 };
 
@@ -45,14 +45,14 @@ assert.equal(ledgers.companies.length,1,'Only external jobwork companies receive
 assert.equal(ledgers.thanwalas.length,1,'Every Thanwala receives an own-stock khata.');
 assert.equal(company.received,10,'Accepted jobwork receipts are the lifetime received total.');
 assert.equal(company.current,3,'Despatched jobwork and returned source stock are outside the current company balance.');
-assert.equal(company.stockCheckExpected,2,'Pending labels are excluded from a frozen stock-check count.');
+assert.equal(company.stockCheckExpected,2,'Pending handwritten codes are excluded from a frozen stock-check count.');
 assert.equal(company.withArtisan,1,'Current artisan custody is counted.');
 assert.equal(company.disputedNow,1,'Current disputes are highlighted.');
-assert.equal(company.pendingLabels,1,'Unscanned labels remain visible in the company khata.');
+assert.equal(company.pendingLabels,1,'Unconfirmed handwritten codes remain visible in the company khata.');
 assert.equal(company.freshDespatched,1,'Only confirmed finished despatches are counted.');
 assert.equal(company.disputeReceived,1,'Confirmed company dispute returns are counted separately.');
 assert.equal(company.artisanGroups[0].artisan,'Example Artisan','Artisan pending groups resolve the worker name.');
-assert.deepEqual(company.artisanGroups[0].codes,['EJL-000001'],'Artisan pending groups retain exact barcode codes.');
+assert.deepEqual(company.artisanGroups[0].codes,['B2C3'],'Artisan pending groups retain exact handwritten codes.');
 assert.equal(company.categories[0].received,10,'Product-category receipts reconcile to the lot.');
 assert.equal(thanwala.received,7,'Thanwala purchased quantity comes from own-stock lots.');
 assert.equal(thanwala.current,1,'Returned source stock is excluded from the live Thanwala balance.');

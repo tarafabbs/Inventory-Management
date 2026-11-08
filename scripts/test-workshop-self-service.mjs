@@ -37,9 +37,9 @@ function recorder(){
 
 function purchaseContext({role='Supervisor',piecePatch={},lotPatch={},siblingPatch={},valuePatch={},activeSource=source,labelConflict=0}={}){
  const record=recorder();
- const piece={id:'piece-1',code:'TF-000001',lot_id:'lot-1',journey:'FACTORY',ownership:'OWN',holder:'IN_HOUSE',condition:'DISPUTED',thanwala_id:null,version:3,...piecePatch};
- const sibling={...piece,id:'piece-2',code:'TF-000002',version:8,...siblingPatch};
- const alreadyIdentified={...piece,id:'piece-3',code:'TF-000003',version:4,thanwala_id:source.id};
+ const piece={id:'piece-1',code:'A7K3',lot_id:'lot-1',journey:'FACTORY',ownership:'OWN',holder:'IN_HOUSE',condition:'DISPUTED',thanwala_id:null,version:3,...piecePatch};
+ const sibling={...piece,id:'piece-2',code:'A7K4',version:8,...siblingPatch};
+ const alreadyIdentified={...piece,id:'piece-3',code:'A7K5',version:4,thanwala_id:source.id};
  const lot={id:'lot-1',number:'LOT-LEGACY-1',journey:'FACTORY',ownership:'OWN',thanwala_id:null,...lotPatch};
  const db={prepare(query){return{bind(...args){record.queries.push({query,args});return{
   async first(){
@@ -60,11 +60,11 @@ check(assigned.ok&&assigned.count===2&&assigned.source===source.name,'A verified
 check(purchase.statements[0].query==='SELECT id FROM lots WHERE id=? FOR UPDATE','Purchase source assignment locks the lot before staged writes');
 const sourceWrites=purchase.statements.filter(write=>write.query.startsWith('UPDATE pieces'));
 check(sourceWrites.length===2&&sourceWrites.every(write=>write.query==='UPDATE pieces SET thanwala_id=?,version=version+1 WHERE id=? AND thanwala_id IS NULL'&&write.args[0]===source.id),'Only pieces without a saved source receive source and version updates');
-check(purchase.statements.some(write=>write.query.startsWith('UPDATE lots SET thanwala_id='))&&purchase.statements.some(write=>write.query.startsWith('UPDATE generated_labels SET thanwala_id=')),'Lot and pending barcode reservation sources are staged together');
+check(purchase.statements.some(write=>write.query.startsWith('UPDATE lots SET thanwala_id='))&&purchase.statements.some(write=>write.query.startsWith('UPDATE generated_labels SET thanwala_id=')),'Lot and pending code reservation sources are staged together');
 check(purchase.events.length===2&&purchase.events.every(event=>event.type==='PURCHASE_SOURCE_ASSIGNED'&&event.after.thanwala_id===source.id&&event.after.version===event.before.version+1),'Every affected piece keeps a dated audit event with incremented version');
-check(purchase.events.every(event=>event.before.code===event.after.code&&event.before.holder===event.after.holder&&event.before.condition===event.after.condition),'Source identification preserves barcode, custody and inspection condition');
+check(purchase.events.every(event=>event.before.code===event.after.code&&event.before.holder===event.after.holder&&event.before.condition===event.after.condition),'Source identification preserves permanent code, custody and inspection condition');
 check(purchase.transactions.length===1&&purchase.transactions[0].type==='PURCHASE_SOURCE_ASSIGNED'&&purchase.transactions[0].lines.length===2&&purchase.transactions[0].reason.includes(source.name),'Purchase source assignment records its exact affected pieces and physical evidence');
-check(purchase.guards.some(guard=>guard.query.includes('version=? AND thanwala_id IS NULL')&&guard.args[1]===purchase.piece.version),'Source assignment guards the scanned piece version and missing-source state');
+check(purchase.guards.some(guard=>guard.query.includes('version=? AND thanwala_id IS NULL')&&guard.args[1]===purchase.piece.version),'Source assignment guards the entered piece version and missing-source state');
 
 async function purchaseRejected(options,pattern,message){
  const context=purchaseContext(options);
@@ -83,20 +83,20 @@ await purchaseRejected({siblingPatch:{thanwala_id:'different-source'}},/lot alre
 await purchaseRejected({labelConflict:1},/lot already contains a different saved purchase source/,'A conflicting saved label source blocks assignment too');
 await purchaseRejected({valuePatch:{verified:false}},/Verify the original purchase source/,'Physical source verification is required');
 await purchaseRejected({valuePatch:{reason:'short'}},/10–2000 characters/,'Insufficient source evidence is rejected');
-await purchaseRejected({valuePatch:{version:2}},/barcode changed/,'A stale scanned piece version blocks source assignment');
+await purchaseRejected({valuePatch:{version:2}},/code changed/,'A stale entered piece version blocks source assignment');
 await purchaseRejected({activeSource:null},/Choose an active Thanwala/,'An unavailable Thanwala cannot be assigned');
 check(await assignPurchaseSource({...purchaseContext(),op:'unrelated'})===null,'The source handler does not intercept unrelated operations');
 
 function intakeContext({reservationState='AVAILABLE',legacyVersion=7,legacyExists=true}={}){
  const record=recorder();
- const label={id:'piece-1',code:'TF-000001',lot_id:'lot-1',company_id:'company-1',product_id:'product-1',ownership:'OWN',thanwala_id:source.id,state:reservationState};
+ const label={id:'piece-1',code:'A7K3',lot_id:'lot-1',company_id:'company-1',product_id:'product-1',ownership:'OWN',thanwala_id:source.id,state:reservationState};
  const legacy=legacyExists?{...label,state:undefined,holder:'IN_HOUSE',condition:'PENDING_LABEL_CONFIRMATION',version:legacyVersion,label_confirmed_at:null}:null;
  const db={prepare(query){return{bind(...args){record.queries.push({query,args});return{async first(){
   if(query.includes('FROM generated_labels g JOIN'))return args[0]===label.id?label:null;
   if(query.includes('FROM pieces g JOIN')&&query.includes("g.condition='PENDING_LABEL_CONFIRMATION'"))return args[0]===label.id?legacy:null;
   throw Error('Unexpected intake query: '+query);
  }}}}}};
- return {...record,db,label,legacy,op:'intake',v:{lot_id:label.lot_id,lines:[{id:label.id,outcome:'OK',source:'scanner'}]}};
+ return {...record,db,label,legacy,op:'intake',v:{lot_id:label.lot_id,lines:[{id:label.id,outcome:'OK',source:'manual'}]}};
 }
 
 const restored=intakeContext();
@@ -112,7 +112,7 @@ check(restored.guards.some(guard=>guard.query.includes("version=? AND condition=
 
 const fresh=intakeContext({reservationState:'PENDING',legacyExists:false});
 const entered=await intakeOperation(fresh);
-check(entered.ok&&entered.count===1,'A fresh prepared barcode can enter inventory');
+check(entered.ok&&entered.count===1,'A fresh prepared handwritten code can enter inventory');
 check(fresh.statements.filter(write=>write.query.startsWith('INSERT INTO pieces')).length===1,'First intake inserts exactly one permanent piece');
 check(!fresh.queries.some(query=>query.query.includes('FROM pieces g JOIN')),'A fresh pending reservation does not use the legacy-piece fallback');
 check(fresh.events.length===1&&fresh.events[0].before===null&&fresh.events[0].after.version===1,'First intake history starts at piece version one');

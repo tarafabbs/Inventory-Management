@@ -1,13 +1,13 @@
 import {permitted} from './rules';
 
-// One-time legacy source identification; no barcode, quantity or custody changes.
+// One-time legacy source identification; no permanent-code, quantity or custody changes.
 export async function assignPurchaseSource(ctx:any){
  const {op,v,db,add,guard,event,transaction,user,actor,time,fail}=ctx;
  if(op!=='assignThanwala')return null;
  if(!permitted(user.role,'backfillThanwala'))throw fail('Your role cannot identify workshop purchase sources.',403);
  const piece=await db.prepare('SELECT * FROM pieces WHERE id=?').bind(v.id||'').first();
  if(!piece||piece.journey==='OFFICE'||piece.ownership!=='OWN'||!['IN_HOUSE','WITH_ARTISAN','GROUND_STAFF','EXCEPTION'].includes(piece.holder))throw fail('Choose an Own Product within workshop custody.',403);
- if(piece.version!==v.version||piece.thanwala_id)throw fail('This barcode changed or already has its purchase source saved. Refresh and review it.',409);
+ if(piece.version!==v.version||piece.thanwala_id)throw fail('This code changed or already has its purchase source saved. Refresh and review it.',409);
  const source=await db.prepare('SELECT * FROM thanwalas WHERE id=? AND active=1').bind(v.thanwala_id||'').first();
  if(!source)throw fail('Choose an active Thanwala.');
  const reason=String(v.reason||'').trim();if(v.verified!==true||reason.length<10||reason.length>2000)throw fail('Verify the original purchase source and describe the physical or bill evidence in 10–2000 characters.');

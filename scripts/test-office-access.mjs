@@ -14,7 +14,7 @@ const {permitted,canManageUser}=await load('../lib/rules.ts');
 const url=process.env.SUPABASE_DATABASE_URL||process.env.POSTGRES_URL||process.env.DATABASE_URL;
 assert.ok(url,'Set the database URL before running integration checks.');
 const sql=postgres(url,{max:1,prepare:false,ssl:'require',connect_timeout:15});
-const tables=['companies','products','lots','pieces','piece_events','transactions','transaction_items','guards','print_jobs','exceptions'];
+const tables=['companies','products','lots','pieces','piece_events','transactions','transaction_items','guards','exceptions'];
 function statement(query){for(const table of tables)query=query.replace(new RegExp(`\\b(FROM|JOIN|INTO|UPDATE|DELETE\\s+FROM)\\s+${table}\\b`,'gi'),(_,keyword)=>`${keyword} inventory.${table}`);let index=0;return query.replace(/\?/g,()=>`$${++index}`)}
 function database(tx){return{prepare(query){return{bind(...args){return{async first(){return(await tx.unsafe(statement(query),args))[0]||null},async all(){return{results:await tx.unsafe(statement(query),args)}}}}}}}}
 let checks=0;const check=(value,message)=>{assert.ok(value,message);checks++};
@@ -35,22 +35,21 @@ try{
   })}
   check(permitted('Office Manager','officeEntry')&&!permitted('Office Manager','receipt')&&!permitted('Office Manager','handoff'),'Office Manager is office-only');
   check(permitted('Assistant Manager','officeEntry')&&!permitted('Assistant Manager','user'),'Assistant Manager operates office stock without access control');
-  check(!permitted('Office Staff','officeEntry')&&permitted('Office Staff','officeReceive'),'Office Staff keeps scan-only office operations');
+  check(!permitted('Office Staff','officeEntry')&&permitted('Office Staff','officeReceive'),'Office Staff keeps manual code-entry office operations');
   check(canManageUser('Office Manager',null,'Office Staff')&&canManageUser('Office Manager','Assistant Manager','Office Staff')&&!canManageUser('Office Manager','Admin','Office Staff')&&!canManageUser('Office Manager',null,'Supervisor'),'Office Manager can grant only the two subordinate office roles');
-  const marker=id().replaceAll('-','').slice(0,8),prefix=('O'+id().replace(/[^a-f]/g,'').slice(0,5)).toUpperCase();
-  const created=await run(officeOperation,'officeNewEntry',{vendor_name:'Office Vendor '+marker,vendor_prefix:prefix,vendor_contact:'test',product_name:'Office Saree '+marker,material:'Cotton',color:'Blue',reference:'',received_at:time.slice(0,10),quantity:2,notes:'Rolled-back integration fixture'});
-  check(created.codes.length===2&&new Set(created.codes).size===2,'Office New Entry creates unique permanent barcodes');
+  const marker=id().replaceAll('-','').slice(0,8);
+  const created=await run(officeOperation,'officeNewEntry',{vendor_name:'Office Vendor '+marker,vendor_contact:'test',product_name:'Office Saree '+marker,material:'Cotton',color:'Blue',reference:'',received_at:time.slice(0,10),quantity:2,notes:'Rolled-back integration fixture'});
+  check(created.codes.length===2&&new Set(created.codes).size===2&&created.codes.every(code=>/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}$/.test(code)),'Office New Entry creates unique four-character permanent codes');
   let pieces=await tx`select * from inventory.pieces where lot_id=${created.lotId} order by code`;
-  check(pieces.length===2&&pieces.every(p=>p.journey==='OFFICE'&&p.ownership==='EXTERNAL'&&p.holder==='OFFICE_PENDING'&&p.condition==='PENDING_LABEL_CONFIRMATION'&&!p.label_confirmed_at),'Outside-vendor barcodes remain pending and office-only until scanned');
+  check(pieces.length===2&&pieces.every(p=>p.journey==='OFFICE'&&p.ownership==='EXTERNAL'&&p.holder==='OFFICE_PENDING'&&p.condition==='PENDING_LABEL_CONFIRMATION'&&!p.label_confirmed_at),'Outside-vendor codes remain pending and office-only until manually submitted');
   const lot=(await tx`select * from inventory.lots where id=${created.lotId}`)[0];
   check(lot.journey==='OFFICE'&&lot.reference==='','Office lot stays valid without a bill and is permanently marked as an office journey');
-  check((await tx`select count(*)::int as n from inventory.print_jobs where codes=${JSON.stringify(created.codes)}`)[0].n===1,'Initial office label printing is audited');
   const entryValues={id:lot.id,reference:'',received_at:lot.received_at,notes:'Corrected office entry '+marker,reason:'Checked original office receipt',expected:{reference:lot.reference,received_at:lot.received_at,notes:lot.notes}};
   const edited=await run(officeOperation,'officeEntryEdit',entryValues);
   const editedLot=(await tx`select * from inventory.lots where id=${lot.id}`)[0];
   check(editedLot.reference===''&&editedLot.notes===entryValues.notes&&editedLot.journey==='OFFICE','Office entry metadata corrections accept an optional blank bill and retain the office journey');
   const afterEditPieces=await tx`select * from inventory.pieces where lot_id=${lot.id} order by code`;
-  check(afterEditPieces.length===2&&afterEditPieces.every((piece,i)=>piece.code===pieces[i].code&&piece.version===pieces[i].version&&piece.condition===pieces[i].condition),'Entry correction does not change barcode count, identity or inventory state');
+  check(afterEditPieces.length===2&&afterEditPieces.every((piece,i)=>piece.code===pieces[i].code&&piece.version===pieces[i].version&&piece.condition===pieces[i].condition),'Entry correction does not change code count, identity or inventory state');
   const entryAudit=(await tx`select * from inventory.transactions where id=${edited.id}`)[0],entryAuditRow=JSON.parse(entryAudit.snapshot)[0];
   check(entryAudit.type==='OFFICE_ENTRY_EDIT'&&entryAuditRow.before.notes===lot.notes&&entryAuditRow.after.notes===entryValues.notes,'Office entry correction retains its before/after audit record');
   await assert.rejects(run(officeOperation,'officeEntryEdit',entryValues),/changed while you were editing/);
@@ -67,11 +66,11 @@ try{
   await assert.rejects(run(officeOperation,'officeMasterEdit',masterValues),/changed while you were editing/);
   const currentMaster={...masterValues,name:'Another Office Vendor '+marker,expected:{name:updatedVendor.name,contact:updatedVendor.contact}};
   await assert.rejects(run(officeOperation,'officeMasterEdit',currentMaster,{user:{id:'office-staff-test',role:'Office Staff',name:'Office staff test'}}),/cannot edit office vendors or products/);
-  await assert.rejects(run(officeOperation,'officeMasterEdit',{...currentMaster,prefix:updatedVendor.prefix==='ZZ'?'YY':'ZZ'}),/cannot change barcode prefixes/);
+  await assert.rejects(run(officeOperation,'officeMasterEdit',{...currentMaster,prefix:updatedVendor.prefix==='ZZ'?'YY':'ZZ'}),/cannot change internal identity/);
   await run(officeOperation,'officeLabel',{id:pieces[0].id,version:pieces[0].version});
   await run(officeOperation,'officeLabel',{id:pieces[1].id,version:pieces[1].version});
   pieces=await tx`select * from inventory.pieces where lot_id=${created.lotId} order by code`;
-  check(pieces.every(p=>p.holder==='OFFICE_STOCK'&&p.condition==='FINISHED'&&p.label_confirmed_at&&p.version===2),'Attached-label scans activate outside-vendor office inventory');
+  check(pieces.every(p=>p.holder==='OFFICE_STOCK'&&p.condition==='FINISHED'&&p.label_confirmed_at&&p.version===2),'Manual handwritten-code confirmations activate outside-vendor office inventory');
   await assert.rejects(
    tx.savepoint(step=>step`update inventory.pieces set holder='IN_HOUSE', version=version+1 where id=${pieces[1].id}`),
    /Invalid factory or office custody state for this journey/
@@ -80,7 +79,7 @@ try{
   await assert.rejects(run(postFinishOperation,'officeReturn',{id:pieces[1].id,version:pieces[1].version,disputed:true,reason:'Must stay office-only'}),/office-only journey/);
   await run(postFinishOperation,'officeSell',{id:pieces[0].id,version:pieces[0].version});
   check((await tx`select holder from inventory.pieces where id=${pieces[0].id}`)[0].holder==='SOLD','Office-only stock can be sold without entering workshop inventory');
-  check((await tx`select count(*)::int as n from inventory.transactions where snapshot like ${'%'+marker+'%'}`)[0].n===6,'New entry, metadata corrections, two label scans and sale remain in office journey history');
+  check((await tx`select count(*)::int as n from inventory.transactions where snapshot like ${'%'+marker+'%'}`)[0].n===6,'New entry, metadata corrections, two code confirmations and sale remain in office journey history');
   console.log(`PASS: ${checks} office-access assertions plus rejection checks. All fixtures will roll back.`);
   throw rollback;
  });

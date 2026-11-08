@@ -1,6 +1,3 @@
-import { barcode } from '../lib/barcode';
-
-export default function BarcodePreview({code,className='barcode',color='#17202b'}:{code:string;className?:string;color?:string}){
- const symbol=barcode(code);
- return <svg viewBox={`0 0 ${symbol.width} 58`} className={className} role="img" aria-label={`Code 128 barcode for ${code}`} preserveAspectRatio="xMidYMid meet" shapeRendering="crispEdges"><rect width={symbol.width} height="58" fill="white"/>{symbol.bars.map((bar,index)=><rect key={index} x={bar.x} y="2" width={bar.w} height="39" fill={color}/>)}<text x={symbol.width/2} y="54" textAnchor="middle" fontSize="9" fontFamily="monospace" letterSpacing="1" fill={color}>{code}</text></svg>
+export default function CodePreview({code,className='barcode',color='#17202b'}:{code:string;className?:string;color?:string}){
+ return <div className={className} role="img" aria-label={`Handwritten inventory code ${code}`} style={{display:'grid',placeItems:'center',minHeight:'58px',background:'#fff',color,border:'2px solid currentColor',borderRadius:'8px',fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace',fontWeight:800,fontSize:'clamp(24px,4vw,42px)',letterSpacing:'.18em',paddingLeft:'.18em'}}>{code}</div>
 }

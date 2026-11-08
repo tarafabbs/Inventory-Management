@@ -13,8 +13,8 @@ export async function postFinishOperation(ctx:any){
  const {op,v,db,add,move,transaction,uuid,fail,time,actor}=ctx;
  if(!movementTypes[op])return null;
  const p:any=await db.prepare('SELECT p.*,c.name AS company_name,pr.name AS product_name FROM pieces p JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id WHERE p.id=?').bind(v.id||'').first();
- if(!p)throw fail('This barcode is not registered.',404);
- if(p.version!==v.version)throw fail('This barcode changed after scanning. Refresh and scan it again.',409);
+ if(!p)throw fail('This code is not registered.',404);
+ if(p.version!==v.version)throw fail('This code changed after entry. Refresh and enter it again.',409);
 
  const disputeReason=String(v.reason||'').trim();
  let after:any={...p},reason='';
@@ -38,12 +38,12 @@ export async function postFinishOperation(ctx:any){
  if(op==='officeReceive'){
   if(p.journey==='OFFICE'||p.holder!=='OFFICE_PENDING'||p.condition!=='FINISHED'||p.ownership!=='OWN')throw fail('This TaraFabbs workshop product is not awaiting Office confirmation.',409);
   after={...p,holder:'OFFICE_STOCK',artisan_id:null,ground_staff_id:null};
-  reason='Office Staff scanned and submitted the product into office inventory';
+  reason='Office Staff entered the code and submitted the product into office inventory';
  }
  if(op==='officeSell'){
   if(p.holder!=='OFFICE_STOCK'||p.condition!=='FINISHED'||(p.ownership!=='OWN'&&p.journey!=='OFFICE'))throw fail('Only confirmed office stock can be marked sold out.',409);
   after={...p,holder:'SOLD',artisan_id:null,ground_staff_id:null};
-  reason='Office Staff scanned and marked the product Sold Out';
+  reason='Office Staff entered the code and marked the product Sold Out';
  }
  if(op==='officeReturn'){
   if(p.journey==='OFFICE')throw fail('Outside-vendor stock has an office-only journey and cannot enter workshop processing.',409);
@@ -65,7 +65,7 @@ export async function postFinishOperation(ctx:any){
   if(p.holder!=='FACTORY_RETURN_PENDING'||p.condition!=='DISPUTED'||p.ownership!=='OWN')throw fail('Only an office or customer dispute awaiting factory receipt can be received here.',409);
   if(v.received!==true)throw fail('Confirm that the physical product has reached the factory.');
   after={...p,holder:'IN_HOUSE',condition:'DISPUTED',artisan_id:null,ground_staff_id:null};
-  reason='Factory Staff scanned and received the disputed return; ready for reprint or Ground Staff';
+  reason='Factory Staff entered the code and received the disputed return; ready for reprint or Ground Staff';
  }
 
  const type=movementTypes[op];

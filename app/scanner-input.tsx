@@ -1,33 +1,39 @@
 'use client';
 import React,{useEffect,useId,useRef,useState} from 'react';
-import {Camera,History,ScanLine,X} from 'lucide-react';
+import {CircleHelp,Hash,History,X} from 'lucide-react';
 import './scanner-accessibility.css';
 
-export default function ScannerInput({onScan,onHistory,onUnreadable,disabled=false,historyDisabled=false,damagedMode=false,label,placeholder,cameraTrigger=0}: {onScan:(code:string,source:string)=>void;onHistory?:(code:string)=>boolean|void|Promise<boolean|void>;onUnreadable?:()=>void;disabled?:boolean;historyDisabled?:boolean;damagedMode?:boolean;label?:string;placeholder?:string;cameraTrigger?:number}){
- const [code,setCode]=useState(''),[camera,setCamera]=useState(false),[cameraReady,setCameraReady]=useState(false),[error,setError]=useState(''),[history,setHistory]=useState(false);
- const id=useId();
- const video=useRef<HTMLVideoElement>(null),input=useRef<HTMLInputElement>(null),callback=useRef(onScan),historyCallback=useRef(onHistory),unreadableCallback=useRef(onUnreadable),historyMode=useRef(history);callback.current=onScan;historyCallback.current=onHistory;unreadableCallback.current=onUnreadable;historyMode.current=history;
+type Props={
+ onScan:(code:string,source:string)=>void|Promise<void>;
+ onHistory?:(code:string)=>boolean|void|Promise<boolean|void>;
+ onUnreadable?:()=>void;
+ disabled?:boolean;
+ historyDisabled?:boolean;
+ damagedMode?:boolean;
+ label?:string;
+ placeholder?:string;
+};
+
+const cleanCode=(value:string)=>value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);
+
+export default function ScannerInput({onScan,onHistory,onUnreadable,disabled=false,historyDisabled=false,damagedMode=false,label,placeholder}:Props){
+ const [code,setCode]=useState(''),[error,setError]=useState(''),[history,setHistory]=useState(false);
+ const id=useId(),input=useRef<HTMLInputElement>(null);
  const effectiveDisabled=history?historyDisabled:disabled;
- useEffect(()=>{if(effectiveDisabled||camera||window.matchMedia('(pointer: coarse)').matches)return;const frame=requestAnimationFrame(()=>{const active=document.activeElement;if(active!==input.current&&active instanceof HTMLElement&&(active.matches('input,textarea,select')||active.isContentEditable))return;input.current?.focus({preventScroll:true})});return()=>cancelAnimationFrame(frame)},[effectiveDisabled,camera]);
- async function deliver(value:string,source:string){const normalized=value.trim().toUpperCase();if(!normalized)return;if(historyMode.current&&historyCallback.current){const found=await historyCallback.current(normalized);setError(found===false?'No saved history exists for this barcode. Verify the printed code and try again.':'');return}callback.current(normalized,source)}
- useEffect(()=>{if(cameraTrigger>0){setError('');setCamera(true)}},[cameraTrigger]);
- useEffect(()=>{if(!camera||effectiveDisabled)return;let disposed=false,controls:any=null,claimed=false,unreadableTimer:ReturnType<typeof setTimeout>|null=null;const preview=video.current;setError('');setCameraReady(false);
-  import('@zxing/browser').then(async({BrowserMultiFormatReader,BrowserMultiFormatOneDReader})=>{
-   if(disposed||!video.current)return;
-   const Reader=damagedMode?BrowserMultiFormatOneDReader:BrowserMultiFormatReader;
-   const reader=new Reader(undefined,damagedMode?{delayBetweenScanAttempts:80,delayBetweenScanSuccess:400}:undefined);
-   controls=await reader.decodeFromConstraints({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}},video.current,(result,_err,ctl)=>{
-    if(!result||disposed||claimed)return;claimed=true;if(unreadableTimer)clearTimeout(unreadableTimer);ctl.stop();setCamera(false);void deliver(result.getText(),'camera');
-   });
-   if(disposed||claimed){controls.stop();return}
-   setCameraReady(true);
-   if(unreadableCallback.current&&!damagedMode&&!historyMode.current)unreadableTimer=setTimeout(()=>{if(disposed||claimed)return;claimed=true;controls?.stop();setCamera(false);setError('');unreadableCallback.current?.()},8000);
-  }).catch((e:any)=>{if(unreadableTimer)clearTimeout(unreadableTimer);if(!disposed){setError(e.name==='NotAllowedError'?'Camera permission was denied. Allow camera access in your browser, or use a barcode scanner.':e.name==='NotFoundError'?'No camera found. Connect a camera or use a barcode scanner.':'Camera could not start. Close other camera apps, use HTTPS, and try again.');setCamera(false)}});
-  return()=>{disposed=true;if(unreadableTimer)clearTimeout(unreadableTimer);controls?.stop();const stream=preview?.srcObject as MediaStream|null;stream?.getTracks().forEach(t=>t.stop());};
- },[camera,effectiveDisabled,damagedMode]);
- return <div className={'scanner-device'+(history?' history-mode':'')+(damagedMode?' damaged-mode':'')}><div className="scanner-device-actions"><span>{history?<History size={16}/>:<ScanLine size={16}/>} {history?'History check active · scan any saved barcode':label||(damagedMode?'Damaged barcode reader · USB / Bluetooth / camera':'USB / Bluetooth scanner · Enter to scan')}</span><div className="scanner-action-buttons">{onHistory&&<button type="button" className={'btn'+(history?' primary':'')} disabled={historyDisabled} aria-pressed={history} onClick={()=>{setHistory(!history);setCamera(false);setError('');setCode('');setTimeout(()=>input.current?.focus(),0)}}><History size={16}/>{history?'History check on':'History check'}</button>}<button type="button" className="btn" disabled={effectiveDisabled} aria-expanded={camera&&!effectiveDisabled} aria-controls={id+'-camera'} onClick={()=>{setError('');setCamera(!camera)}}><Camera size={16}/>{camera?'Close camera':damagedMode?'Try camera scan':'Scan with camera'}</button></div></div>
- <form onSubmit={e=>{e.preventDefault();if(!effectiveDisabled&&code.trim()){void deliver(code,'scanner');setCode('');input.current?.focus()}}}><div className="scan-input"><ScanLine size={22} aria-hidden="true"/><input ref={input} aria-label={history?'Scan barcode to view history':damagedMode?'Scan damaged barcode or enter visible code':'Scan barcode'} aria-describedby={id+'-hint'+(error?' '+id+'-error':'')} aria-invalid={!!error} autoComplete="off" autoCapitalize="characters" spellCheck={false} disabled={effectiveDisabled} value={code} onChange={e=>{setCode(e.target.value);if(error)setError('')}} placeholder={history?'Scan barcode to open its history':placeholder||(damagedMode?'Scan or enter the visible part of the code':'Scan barcode or type Piece Code')}/>{code&&<button type="button" className="scanner-clear-code" aria-label="Clear barcode" disabled={effectiveDisabled} onClick={()=>{setCode('');setError('');input.current?.focus()}}><X size={16}/></button>}<button className="btn primary" disabled={effectiveDisabled||!code.trim()}>{history?'View history':damagedMode?'Try match':'Scan'}</button></div><p id={id+'-hint'} className="scanner-input-hint">{history?'History only · inventory stays unchanged.':damagedMode?'Scan the label or type any readable part of its code.':'Click the code box, scan, then press Enter. On mobile, use Scan with camera.'}</p></form>
- {camera&&!effectiveDisabled&&<div id={id+'-camera'} className="camera-preview" aria-busy={!cameraReady}><div className="scanner-camera-frame"><video ref={video} muted playsInline autoPlay aria-label="Barcode camera preview"/><span className="scanner-camera-guide" aria-hidden="true"/></div><div className="scanner-camera-state" role="status"><span className={cameraReady?'ready':''}/>{cameraReady?'Camera active · align the barcode inside the frame':'Starting camera…'}</div><p>{history?'Point the rear camera at a barcode to open its saved history.':damagedMode?'Hold the damaged bars flat in bright light. The reader will keep trying; if it cannot decode, enter the readable letters or digits above.':onUnreadable?'Keep the barcode steady in bright light. If it still cannot be decoded, Barcode Recovery will be suggested automatically.':'Point the rear camera at one barcode. Scanning pauses for inspection.'}</p><button className="btn" type="button" onClick={()=>setCamera(false)}><X size={15}/>Stop camera</button></div>}
- {error&&<p id={id+'-error'} role="alert" className="form-error">{error}</p>}
+ useEffect(()=>{if(effectiveDisabled)return;const frame=requestAnimationFrame(()=>input.current?.focus({preventScroll:true}));return()=>cancelAnimationFrame(frame)},[effectiveDisabled,history]);
+
+ async function submit(){
+  const normalized=cleanCode(code);
+  if(!normalized)return;
+  if(normalized.length!==4&&!damagedMode){setError('Enter the complete 4-character code written on the tag.');return}
+  if(history&&onHistory){const found=await onHistory(normalized);setError(found===false?'No saved history exists for this code. Check the tag and try again.':'')}
+  else await onScan(normalized,'manual');
+  setCode('');input.current?.focus();
+ }
+
+ return <div className={'scanner-device'+(history?' history-mode':'')+(damagedMode?' damaged-mode':'')}>
+  <div className="scanner-device-actions"><span>{history?<History size={16}/>:<Hash size={16}/>} {history?'History check · enter a saved code':label||(damagedMode?'Find a partially readable tag code':'Type the 4-character tag code')}</span><div className="scanner-action-buttons">{onHistory&&<button type="button" className={'btn'+(history?' primary':'')} disabled={historyDisabled} aria-pressed={history} onClick={()=>{setHistory(!history);setError('');setCode('');setTimeout(()=>input.current?.focus(),0)}}><History size={16}/>{history?'History check on':'History check'}</button>}{onUnreadable&&<button type="button" className="btn" disabled={effectiveDisabled} onClick={onUnreadable}><CircleHelp size={16}/>Code missing?</button>}</div></div>
+  <form onSubmit={event=>{event.preventDefault();if(!effectiveDisabled)void submit()}}><div className="scan-input"><Hash size={22} aria-hidden="true"/><input ref={input} inputMode="text" maxLength={4} aria-label={history?'Enter code to view history':damagedMode?'Enter the readable part of the tag code':'Enter 4-character tag code'} aria-describedby={id+'-hint'+(error?' '+id+'-error':'')} aria-invalid={!!error} autoComplete="off" autoCapitalize="characters" spellCheck={false} disabled={effectiveDisabled} value={code} onChange={event=>{setCode(cleanCode(event.target.value));if(error)setError('')}} placeholder={history?'e.g. A7K3':placeholder||(damagedMode?'Enter 2–4 visible characters':'e.g. A7K3')}/>{code&&<button type="button" className="scanner-clear-code" aria-label="Clear code" disabled={effectiveDisabled} onClick={()=>{setCode('');setError('');input.current?.focus()}}><X size={16}/></button>}<button className="btn primary" disabled={effectiveDisabled||!code.trim()}>{history?'View history':damagedMode?'Find code':'Submit'}</button></div><p id={id+'-hint'} className="scanner-input-hint">{history?'History only · inventory stays unchanged.':damagedMode?'Type the characters that are still readable on the tag.':'Read the tag, type its four characters, then press Submit.'}</p></form>
+  {error&&<p id={id+'-error'} role="alert" className="form-error">{error}</p>}
  </div>;
 }

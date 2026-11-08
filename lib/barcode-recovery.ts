@@ -51,7 +51,7 @@ export async function recoveryRead(db: LedgerDatabase, user: any, params: URLSea
 
 export async function recoveryOperation(ctx: any) {
   const { op, v, db, add, guard, event, transaction, actor, user, time, uuid } = ctx;
-  if (!['recoveryReport', 'recoveryCreate', 'recoveryStart', 'recoveryPrint', 'recoveryConfirm', 'recoveryCancel'].includes(op)) return null;
+  if (!['recoveryReport', 'recoveryCreate', 'recoveryStart', 'recoveryConfirm', 'recoveryCancel'].includes(op)) return null;
   const office = isOfficeRole(user.role);
   let record: any = null;
   if (v.id) {
@@ -70,14 +70,14 @@ export async function recoveryOperation(ctx: any) {
     return { ok: true, recoveryId: id };
   }
   if (op === 'recoveryCreate') {
-    if (record) throw fail('Create each barcode-free recovery as a separate record.');
+    if (record) throw fail('Create each missing-code recovery as a separate record.');
     if (user.role === 'Office Staff') throw fail('Office Staff can restore an existing label. Assistant Manager or Office Manager must create a new outside-vendor identity.', 403);
-    if (v.confirmed !== true) throw fail('Confirm that no original barcode or exact saved identity can be recovered.');
+    if (v.confirmed !== true) throw fail('Confirm that no original code or exact saved identity can be recovered.');
     const company = await db.prepare('SELECT * FROM companies WHERE id=? AND active=1 AND office_only=?').bind(v.company_id || '', office ? 1 : 0).first();
     const product = await db.prepare('SELECT * FROM products WHERE id=? AND active=1 AND office_only=?').bind(v.product_id || '', office ? 1 : 0).first();
     if (!company) throw fail(office ? 'Choose an active Office vendor.' : 'Choose an active company or own brand.');
     if (!product) throw fail(office ? 'Choose an active Office product.' : 'Choose an active workshop product.');
-    if (office && company.ownership !== 'EXTERNAL') throw fail('Office barcode-free recovery requires an outside Office vendor.');
+    if (office && company.ownership !== 'EXTERNAL') throw fail('Office code recovery requires an outside Office vendor.');
     const businessDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(time));
     const receivedAt = String(v.received_at || '').trim() || businessDate;
     const reference = String(v.reference || '').trim();
@@ -94,21 +94,21 @@ export async function recoveryOperation(ctx: any) {
     if (thanwala) guard('SELECT COUNT(*)=1 FROM thanwalas WHERE id=? AND active=1', thanwala.id);
     const lotId = uuid(), labelId = uuid(), recoveryId = uuid();
     const journey = office ? 'OFFICE' : 'WORKSHOP';
-    const code = `${company.prefix}-${String(Number(company.sequence) + 1).padStart(6, '0')}`;
+    const allocated: any = await db.prepare('SELECT inventory.next_piece_code() AS code').first();
+    const code = String(allocated.code);
     const lotNumber = `${office ? 'OFF' : 'LOT'}-${time.slice(2, 10).replaceAll('-', '')}-${lotId.slice(0, 6).toUpperCase()}`;
-    const reason = 'Original barcode completely unavailable; controlled new permanent identity created';
+    const reason = 'Original handwritten code completely unavailable; controlled new permanent identity created';
     const referenceLabel = reference ? `Bill / challan ${reference}` : 'Bill / challan not recorded';
-    const evidence = `Physical item verified without a recoverable barcode; ${company.name}; ${product.name}; ${referenceLabel}; received ${receivedAt}.`;
+    const evidence = `Physical item verified without a recoverable code; ${company.name}; ${product.name}; ${referenceLabel}; received ${receivedAt}.`;
     const item = { id: labelId, code, company_id: company.id, product_id: product.id, lot_id: lotId, ownership: company.ownership, thanwala_id: thanwala?.id || null, journey: office ? 'OFFICE' : 'WORKSHOP', holder: office ? 'OFFICE_PENDING' : 'NOT_REGISTERED', condition: 'PENDING_LABEL_CONFIRMATION', version: office ? 1 : 0, created_at: time, company_name: company.name, product_name: product.name, lot_number: lotNumber, bill_number: reference, received_at: receivedAt, recovery_new_identity: true };
-    add("INSERT INTO lots(id,number,company_id,product_id,ownership,thanwala_id,journey,received_at,reference,stated,accepted,damaged,rejected,reason,notes,status,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?,1,1,0,0,?,?,'PREPARED',?,?)", lotId, lotNumber, company.id, product.id, company.ownership, thanwala?.id || null, journey, receivedAt, reference, reason, 'Barcode-free recovery · new identity pending attached-label scan', actor, time);
+    add("INSERT INTO lots(id,number,company_id,product_id,ownership,thanwala_id,journey,received_at,reference,stated,accepted,damaged,rejected,reason,notes,status,actor,created_at) VALUES(?,?,?,?,?,?,?,?,?,1,1,0,0,?,?,'PREPARED',?,?)", lotId, lotNumber, company.id, product.id, company.ownership, thanwala?.id || null, journey, receivedAt, reference, reason, 'Code recovery · new identity pending manual confirmation', actor, time);
     add('UPDATE companies SET sequence=sequence+1 WHERE id=?', company.id);
     if (office) {
       add("INSERT INTO pieces(id,code,company_id,product_id,lot_id,ownership,journey,holder,condition,version,created_at) VALUES(?,?,?,?,?,?,'OFFICE','OFFICE_PENDING','PENDING_LABEL_CONFIRMATION',1,?)", labelId, code, company.id, product.id, lotId, company.ownership, time);
-      const tx = transaction('OFFICE_VENDOR_INTAKE', null, `Barcode absent recovery · ${company.name} · ${referenceLabel}`, [item]);
+      const tx = transaction('OFFICE_VENDOR_INTAKE', null, `Code recovery · ${company.name} · ${referenceLabel}`, [item]);
       event(item, 'OFFICE_VENDOR_REGISTERED', null, item, `${reason}; ${referenceLabel}`, tx);
     } else add("INSERT INTO generated_labels(id,code,company_id,product_id,lot_id,ownership,thanwala_id,state,created_at) VALUES(?,?,?,?,?,?,?,'PENDING',?)", labelId, code, company.id, product.id, lotId, company.ownership, thanwala?.id || null, time);
     add("INSERT INTO barcode_recoveries(id,code,status,reason,evidence,identified_reason,scope,actor,created_at,identified_by,identified_at,snapshot) VALUES(?,?,'AWAITING_SCAN',?,?,?,?,?,?,?,?,?)", recoveryId, code, reason, evidence, reason, office ? 'OFFICE' : 'FACTORY', actor, time, actor, time, JSON.stringify(item));
-    add('INSERT INTO print_jobs(id,codes,reason,actor,created_at,status,verified) VALUES(?,?,?,?,?,?,1)', uuid(), JSON.stringify([code]), `Barcode-free recovery ${recoveryId}: ${reason}`, actor, time, 'REQUESTED');
     return { ok: true, recoveryId, lotId, codes: [code] };
   }
   if (op !== 'recoveryStart' && !record) throw fail('Select an existing recovery record.');
@@ -116,9 +116,9 @@ export async function recoveryOperation(ctx: any) {
   const code = String(record?.code || v.code || '').trim().toUpperCase();
   const p = code ? await db.prepare('SELECT * FROM pieces WHERE code=?').bind(code).first() : null;
   const g = !p && code ? await db.prepare("SELECT * FROM generated_labels WHERE code=? AND state='PENDING'").bind(code).first() : null;
-  if (office && code && (!p || !officeHolders.includes(p.holder))) throw fail('This barcode is outside Office access. Ask Factory Staff to continue its recovery.', 403);
+  if (office && code && (!p || !officeHolders.includes(p.holder))) throw fail('This code is outside Office access. Ask Factory Staff to continue its recovery.', 403);
   if (op === 'recoveryCancel') {
-    try { if (JSON.parse(record.snapshot || '{}').recovery_new_identity) throw fail('A newly created permanent barcode cannot be cancelled here. If it was created in error, Admin must use Data Control within five hours.'); } catch (error: any) { if (error?.status) throw error; }
+    try { if (JSON.parse(record.snapshot || '{}').recovery_new_identity) throw fail('A newly created permanent code cannot be cancelled here. If it was created in error, Admin must use Data Control within five hours.'); } catch (error: any) { if (error?.status) throw error; }
     const reason = required(v.reason, 'Cancellation reason');
     add("UPDATE barcode_recoveries SET status='CANCELLED',closed_reason=?,closed_at=?,confirmed_by=? WHERE id=?", reason, time, actor, record.id);
     if (p) event(p, 'LABEL_RECOVERY_CANCELLED', p, p, `${record.id}: ${reason}`);
@@ -144,18 +144,12 @@ export async function recoveryOperation(ctx: any) {
     else add(`INSERT INTO barcode_recoveries(id,code,status,reason,evidence,identified_reason,scope,actor,created_at,identified_by,identified_at,snapshot)
       VALUES(?,?,'AWAITING_SCAN',?,?,?,?,?,?,?,?,?)`, id, code, reason, evidence, reason, office ? 'OFFICE' : 'FACTORY', actor, time, actor, time, JSON.stringify(item));
     if (p) event(p, 'LABEL_RECOVERY_REQUESTED', p, p, `${id}: ${reason}. Identity evidence: ${evidence}`);
-    add('INSERT INTO print_jobs(id,codes,reason,actor,created_at,status,verified) VALUES(?,?,?,?,?,?,1)', uuid(), JSON.stringify([code]), `Barcode recovery ${id}: ${reason}`, actor, time, 'REQUESTED');
     return { ok: true, recoveryId: id, codes: [code] };
   }
-  if (record.status !== 'AWAITING_SCAN') throw fail('Identify the physical piece before printing or confirming.');
-  if (op === 'recoveryPrint') {
-    add('INSERT INTO print_jobs(id,codes,reason,actor,created_at,status,verified) VALUES(?,?,?,?,?,?,1)', uuid(), JSON.stringify([code]), `Barcode recovery ${record.id}: printer retry`, actor, time, 'REQUESTED');
-    if (p) event(p, 'LABEL_RECOVERY_PRINT_RETRY', p, p, `Printer retry for recovery ${record.id}`);
-    return { ok: true, recoveryId: record.id, codes: [code] };
-  }
-  if (String(v.code || '').trim().toUpperCase() !== code) throw fail('The scanned code does not match this replacement label. Nothing has changed.');
-  if (v.attached !== true || !['camera', 'scanner'].includes(v.source)) throw fail('Attach the replacement, remove any old / spare labels, and scan the attached barcode.');
-  add("UPDATE barcode_recoveries SET status='CONFIRMED',confirmed_at=?,confirmed_by=?,confirmation_source=? WHERE id=?", time, actor, v.source, record.id);
-  if (p) event(p, 'LABEL_RECOVERY_CONFIRMED', p, p, `Replacement attached and checked; recovery ${record.id}. ${record.evidence}`);
+  if (record.status !== 'AWAITING_SCAN') throw fail('Identify the physical piece before confirming a replacement tag.');
+  if (String(v.code || '').trim().toUpperCase() !== code) throw fail('The entered code does not match this replacement tag. Nothing has changed.');
+  if (v.attached !== true || v.source !== 'manual') throw fail('Write the code on the replacement tag, attach it to the exact saree, and type the same code to confirm.');
+  add("UPDATE barcode_recoveries SET status='CONFIRMED',confirmed_at=?,confirmed_by=?,confirmation_source='manual' WHERE id=?", time, actor, record.id);
+  if (p) event(p, 'LABEL_RECOVERY_CONFIRMED', p, p, `Handwritten replacement tag attached and checked; recovery ${record.id}. ${record.evidence}`);
   return { ok: true, recoveryId: record.id };
 }

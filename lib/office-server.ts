@@ -16,7 +16,7 @@ export async function officeOperation(ctx:any){
   if(!receivedAt||!Number.isFinite(Date.parse(receivedAt)))throw fail('Enter a valid office receipt date.');
   if(notes.length>2000)throw fail('Keep office entry notes under 2,000 characters.');
   if(reason.length<3||reason.length>2000)throw fail('Explain the Office entry correction in 3–2000 characters.');
-  for(const field of ['company_id','product_id','ownership','journey','stated','accepted','quantity'])if(v[field]!=null&&String(v[field])!==String(lot[field]))throw fail('This correction can change only the optional bill number, receipt date and notes. Barcode quantities and source remain fixed.');
+  for(const field of ['company_id','product_id','ownership','journey','stated','accepted','quantity'])if(v[field]!=null&&String(v[field])!==String(lot[field]))throw fail('This correction can change only the optional bill number, receipt date and notes. Code quantities and source remain fixed.');
   if(reference===lot.reference&&receivedAt===lot.received_at&&notes===lot.notes)throw fail('Change a bill detail before saving a correction.');
   add("SELECT id FROM lots WHERE id=? AND journey='OFFICE' FOR UPDATE",lot.id);
   guard("SELECT COUNT(*)=1 FROM lots WHERE id=? AND journey='OFFICE' AND reference=? AND received_at=? AND notes=?",lot.id,lot.reference,lot.received_at,lot.notes);
@@ -32,7 +32,7 @@ export async function officeOperation(ctx:any){
   if(!table||!v.id)throw fail('Choose an office-only vendor or product to edit.');
   const record=await db.prepare(`SELECT * FROM ${table} WHERE id=? AND office_only=1`).bind(v.id).first();
   if(!record)throw fail('This record belongs outside Office access.',403);
-  for(const field of ['prefix','ownership','office_only','active'])if(v[field]!=null&&String(v[field])!==String(record[field]))throw fail('Office correction cannot change barcode prefixes, ownership, access scope or archive status.');
+  for(const field of ['prefix','ownership','office_only','active'])if(v[field]!=null&&String(v[field])!==String(record[field]))throw fail('Office correction cannot change internal identity, ownership, access scope or archive status.');
   const fields=table==='companies'?['name','contact']:['name','material','weave','color','design'];
   if(!v.expected||fields.some(field=>String(v.expected[field]??'')!==String(record[field]??'')))throw fail('This office record changed while you were editing. Reselect it and review the latest details.',409);
   const after:Record<string,string>={},before:Record<string,string>={};
@@ -52,10 +52,10 @@ export async function officeOperation(ctx:any){
 
  if(op==='officeLabel'){
   const p:any=await db.prepare('SELECT p.*,c.name AS company_name,pr.name AS product_name,l.number AS lot_number FROM pieces p JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id JOIN lots l ON l.id=p.lot_id WHERE p.id=?').bind(v.id||'').first();
-  if(!p)throw fail('This office barcode is not registered.',404);
-  if(p.version!==v.version)throw fail('This barcode changed after scanning. Refresh and scan it again.',409);
+  if(!p)throw fail('This office code is not registered.',404);
+  if(p.version!==v.version)throw fail('This item changed after the code was entered. Refresh and enter it again.',409);
   if(p.journey!=='OFFICE'||p.holder!=='OFFICE_PENDING'||p.condition!=='PENDING_LABEL_CONFIRMATION')throw fail('Only a pending outside-vendor office label can be confirmed here.',409);
-  const reason='Outside-vendor label attached, scanned and submitted into office inventory';
+  const reason='Outside-vendor handwritten code checked and submitted into office inventory';
   const tx=transaction('OFFICE_LABEL_CONFIRM',null,reason,[p]);
   move(p,'OFFICE_LABEL_CONFIRM',{...p,holder:'OFFICE_STOCK',condition:'FINISHED',label_confirmed_at:time,artisan_id:null,ground_staff_id:null},reason,tx);
   return {ok:true,id:tx,count:1};
@@ -73,11 +73,10 @@ export async function officeOperation(ctx:any){
   company=await db.prepare('SELECT * FROM companies WHERE id=? AND active=1 AND office_only=1').bind(v.company_id).first();
   if(!company)throw fail('Choose an active outside vendor created for Office New Entry.');
  }else{
-  const name=clean(v.vendor_name),prefix=clean(v.vendor_prefix).toUpperCase(),contact=clean(v.vendor_contact);
+  const name=clean(v.vendor_name),contact=clean(v.vendor_contact),id=uuid(),prefix=id.replaceAll('-','').slice(0,6).toUpperCase();
   if(!name)throw fail('Enter the outside vendor name.');
-  if(!/^[A-Z]{2,6}$/.test(prefix))throw fail('Use a unique vendor prefix of 2–6 uppercase letters.');
-  if(await db.prepare('SELECT id FROM companies WHERE lower(name)=lower(?) OR prefix=?').bind(name,prefix).first())throw fail('This vendor name or barcode prefix already exists. Select it or use another prefix.',409);
-  company={id:uuid(),name,prefix,ownership:'EXTERNAL',contact,sequence:0,office_only:1,active:1};
+  if(await db.prepare('SELECT id FROM companies WHERE lower(name)=lower(?)').bind(name).first())throw fail('This vendor name already exists. Select it from the list.',409);
+  company={id,name,prefix,ownership:'EXTERNAL',contact,sequence:0,office_only:1,active:1};
   add("INSERT INTO companies(id,name,prefix,ownership,contact,office_only) VALUES(?,?,?,'EXTERNAL',?,1)",company.id,name,prefix,contact);
  }
 
@@ -98,15 +97,14 @@ export async function officeOperation(ctx:any){
  const lotId=uuid(),number=`OFF-${time.slice(2,10).replaceAll('-','')}-${lotId.slice(0,6).toUpperCase()}`;
  add("INSERT INTO lots(id,number,company_id,product_id,ownership,journey,received_at,reference,stated,accepted,damaged,rejected,reason,notes,status,actor,created_at) VALUES(?,?,?,?,?,'OFFICE',?,?,?,?,0,0,'',?,'PREPARED',?,?)",lotId,number,company.id,product.id,'EXTERNAL',receivedAt,reference,quantity,quantity,notes,actor,time);
  add('UPDATE companies SET sequence=sequence+? WHERE id=?',quantity,company.id);
- const rows=[];
- for(let i=1;i<=quantity;i++){
-  const id=uuid(),code=`${company.prefix}-${String(Number(company.sequence)+i).padStart(6,'0')}`;
+ const rows=[],allocatedCodes=await db.prepare('SELECT inventory.next_piece_code() AS code FROM generate_series(1,?)').bind(quantity).all();
+ for(const allocated of allocatedCodes.results){
+  const id=uuid(),code=String((allocated as any).code);
   const piece={id,code,company_id:company.id,product_id:product.id,lot_id:lotId,ownership:'EXTERNAL',journey:'OFFICE',holder:'OFFICE_PENDING',condition:'PENDING_LABEL_CONFIRMATION',label_confirmed_at:null,version:1,created_at:time,company_name:company.name,product_name:product.name,lot_number:number};
   rows.push(piece);
   add("INSERT INTO pieces(id,code,company_id,product_id,lot_id,ownership,journey,holder,condition,version,created_at) VALUES(?,?,?,?,?,'EXTERNAL','OFFICE','OFFICE_PENDING','PENDING_LABEL_CONFIRMATION',1,?)",id,code,company.id,product.id,lotId,time);
-  event(piece,'OFFICE_VENDOR_REGISTERED',null,piece,`${referenceLabel}; label reserved for office attachment`);
+  event(piece,'OFFICE_VENDOR_REGISTERED',null,piece,`${referenceLabel}; handwritten code reserved for the physical tag`);
  }
- const tx=transaction('OFFICE_VENDOR_INTAKE',null,`Outside vendor ${company.name} · ${referenceLabel} · ${quantity} labels created`,rows);
- add('INSERT INTO print_jobs(id,codes,reason,actor,created_at,status,verified) VALUES(?,?,?,?,?,?,0)',uuid(),JSON.stringify(rows.map(p=>p.code)),`Office vendor intake · ${referenceLabel}`,actor,time,'REQUESTED');
+ const tx=transaction('OFFICE_VENDOR_INTAKE',null,`Outside vendor ${company.name} · ${referenceLabel} · ${quantity} handwritten codes created`,rows);
  return {ok:true,id:tx,lotId,count:quantity,codes:rows.map(p=>p.code)};
 }

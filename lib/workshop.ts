@@ -1,7 +1,7 @@
 export const generalGroundStaffId='warehouse-ground-staff';
 export const workshopTypes:Record<string,string>={artistTransfer:'ARTIST_TRANSFER',groundSend:'GROUND_ISSUE',groundDispute:'GROUND_DISPUTE',reprintOut:'REPRINT_OUT',reprintReceive:'REPRINT_RECEIVE',finishReceive:'FINISH_RECEIVE',stockDispute:'STOCK_DISPUTE'};
 export function workshopError(p:any,op:string,v:any){
- if(!p||!p.label_confirmed_at)return 'Scan a registered and inspected saree.';
+ if(!p||!p.label_confirmed_at)return 'Enter a registered and inspected saree code.';
  if(p.holder==='RETURNED_TO_SOURCE')return 'This saree has already been returned to its origin.';
  if(p.holder==='FACTORY_RETURN_PENDING')return 'Factory Staff must complete Receive Return at Factory before any reprint or finishing movement.';
  if(op==='artistTransfer'){
@@ -16,8 +16,8 @@ export function workshopError(p:any,op:string,v:any){
   const disputed=['DAMAGED','DISPUTED','NEEDS_REWORK'].includes(p.condition);
   if(!disputed)return 'Record the damage, dispute or rework finding before sending this saree for reprint.';
  }
- if(op==='reprintReceive'&&(p.holder!=='WITH_ARTISAN'||p.artisan_id!==v.artisan_id||p.condition!=='REPRINTING'))return 'Scan only reprint sarees held by the selected artist.';
- if(op==='stockDispute'&&(p.holder!=='IN_HOUSE'||['DAMAGED','DISPUTED','PENDING_LABEL_CONFIRMATION'].includes(p.condition)))return 'Scan an in-house saree that has not already been marked damaged or disputed.';
+ if(op==='reprintReceive'&&(p.holder!=='WITH_ARTISAN'||p.artisan_id!==v.artisan_id||p.condition!=='REPRINTING'))return 'Enter only reprint sarees held by the selected artist.';
+ if(op==='stockDispute'&&(p.holder!=='IN_HOUSE'||['DAMAGED','DISPUTED','PENDING_LABEL_CONFIRMATION'].includes(p.condition)))return 'Enter an in-house saree that has not already been marked damaged or disputed.';
  return '';
 }
 
@@ -30,7 +30,7 @@ export async function workshopOperation(ctx:any){
   return {ok:true,id};
  }
  if(!workshopTypes[op])return null;
- if(!Array.isArray(v.lines)||!v.lines.length||v.lines.length>100||new Set(v.lines.map((l:any)=>l.id)).size!==v.lines.length)throw fail('Scan 1–100 different sarees.');
+ if(!Array.isArray(v.lines)||!v.lines.length||v.lines.length>100||new Set(v.lines.map((l:any)=>l.id)).size!==v.lines.length)throw fail('Enter 1–100 different saree codes.');
  let staff:any=null,artist:any=null,fromArtist:any=null;
  if(op==='groundSend'&&!v.ground_staff_id){staff={id:generalGroundStaffId,name:'Ground Staff',active:1};add('INSERT INTO ground_staff(id,name,contact,active) VALUES(?,?,?,1) ON CONFLICT(id) DO NOTHING',staff.id,staff.name,'');guard('SELECT COUNT(*)=1 FROM ground_staff WHERE id=? AND active=1',staff.id);}
  else if(['groundSend','groundDispute','finishReceive'].includes(op)&&v.ground_staff_id){staff=await db.prepare('SELECT * FROM ground_staff WHERE id=? AND active=1').bind(v.ground_staff_id).first();if(!staff)throw fail('This Ground Staff record is not active.');guard('SELECT COUNT(*)=1 FROM ground_staff WHERE id=? AND active=1',staff.id);}
@@ -39,7 +39,7 @@ export async function workshopOperation(ctx:any){
  const staged=[];
  for(const line of v.lines){
   const p=await db.prepare('SELECT p.*,c.name AS company_name,pr.name AS product_name,l.number AS lot_number,g.name AS ground_staff_name,a.name AS current_artisan_name FROM pieces p JOIN companies c ON c.id=p.company_id JOIN products pr ON pr.id=p.product_id JOIN lots l ON l.id=p.lot_id LEFT JOIN ground_staff g ON g.id=p.ground_staff_id LEFT JOIN artisans a ON a.id=p.artisan_id WHERE p.id=?').bind(line.id).first();
-  if(!p||p.version!==line.version)throw fail('A scanned saree changed. Refresh and rescan the whole list.',409);
+  if(!p||p.version!==line.version)throw fail('An entered saree changed. Refresh and re-enter the whole list.',409);
   const error=workshopError(p,op,v);if(error)throw fail(p.code+': '+error,409);
   if(op==='reprintOut'){line.outcome='OK';line.reason=line.reason?.trim()||`Reprint requested from ${String(p.condition).toLowerCase().replaceAll('_',' ')} status`;}
   const receiving=['reprintReceive','finishReceive'].includes(op),dispute=['groundDispute','stockDispute'].includes(op);
