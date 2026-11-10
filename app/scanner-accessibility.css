@@ -5,3 +5,5 @@
 .scanner-clear-code:focus-visible{outline:3px solid #bcaefa;outline-offset:2px}
 .scanner-input-hint{margin:8px 3px 0;color:#7c6e86;font-size:11px;line-height:1.55}
 @media(max-width:760px){.scanner-device .scan-input input{font-size:16px}.scanner-device .scan-input>.btn,.scanner-clear-code{min-height:44px}.scanner-input-hint{font-size:11px}.scanner-action-buttons .btn{justify-content:center}}
+.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}.photo-code-button{background:#f7f2ff;border-color:#e2d8f2;color:#765aaa}.spin{animation:scanner-spin .9s linear infinite}@keyframes scanner-spin{to{transform:rotate(360deg)}}
+@media(max-width:760px){.scanner-device-actions{align-items:stretch;flex-direction:column}.scanner-action-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.scanner-action-buttons .btn{width:100%}.scan-input{align-items:stretch}.scanner-device .scan-input input{min-height:48px}}

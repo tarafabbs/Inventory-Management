@@ -140,4 +140,7 @@ const prepared=await intakeOperation(optionalBrand);
 check(prepared.ok&&prepared.count===1,'An Own Product can be prepared without selecting an own brand or purchasing company');
 check(optionalBrand.queries.some(query=>query.query.startsWith('SELECT * FROM companies')&&query.args[0]==='system-tarafabbs-own'),'A blank optional brand resolves to the protected internal TaraFabbs source');
 check(optionalBrand.statements.some(write=>write.query.startsWith('INSERT INTO lots')&&write.args[2]==='system-tarafabbs-own'),'The internal source keeps the prepared lot relationally complete');
+check(optionalBrand.statements.some(write=>write.query.startsWith('INSERT INTO generated_labels')&&write.query.includes("'AVAILABLE'")),'New Entry marks generated identities available in the same save');
+check(optionalBrand.statements.some(write=>write.query.startsWith('INSERT INTO pieces')&&write.query.includes("'IN_HOUSE','AVAILABLE'")),'New Entry places every generated code directly in own stock');
+check(optionalBrand.statements.some(write=>write.query.startsWith('INSERT INTO piece_events')&&write.query.includes("'REGISTERED'")),'Direct stock entry keeps a permanent registration event');
 console.log(`PASS: ${checks} workshop source-identification and intake-recovery assertions. No database writes.`);

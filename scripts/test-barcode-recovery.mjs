@@ -117,7 +117,7 @@ try {
     await assert.rejects(run('recoveryCreate', { company_id: company, product_id: product, thanwala_id: thanwala, confirmed: false }), /Confirm/);
     await assert.rejects(run('recoveryCreate', { company_id: company, product_id: product, confirmed: true }), /Thanwala/);
     const created = await run('recoveryCreate', { company_id: company, product_id: product, thanwala_id: thanwala, received_at: '', reference: '', confirmed: true }, 'Receiving');
-    check(created.codes.length === 1 && /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}$/.test(created.codes[0]), 'Missing-code recovery reserves one new four-character permanent code');
+    check(created.codes.length === 1 && /^[0-9]{1,4}$/.test(created.codes[0]), 'Missing-code recovery reserves one new compact numeric permanent code');
     const createdLabel = (await tx`select * from inventory.generated_labels where code=${created.codes[0]}`)[0];
     const createdLot = (await tx`select * from inventory.lots where id=${created.lotId}`)[0];
     const createdRecovery = (await tx`select * from inventory.barcode_recoveries where id=${created.recoveryId}`)[0];

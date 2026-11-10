@@ -97,14 +97,14 @@ export async function officeOperation(ctx:any){
  const lotId=uuid(),number=`OFF-${time.slice(2,10).replaceAll('-','')}-${lotId.slice(0,6).toUpperCase()}`;
  add("INSERT INTO lots(id,number,company_id,product_id,ownership,journey,received_at,reference,stated,accepted,damaged,rejected,reason,notes,status,actor,created_at) VALUES(?,?,?,?,?,'OFFICE',?,?,?,?,0,0,'',?,'PREPARED',?,?)",lotId,number,company.id,product.id,'EXTERNAL',receivedAt,reference,quantity,quantity,notes,actor,time);
  add('UPDATE companies SET sequence=sequence+? WHERE id=?',quantity,company.id);
- const rows=[],allocatedCodes=await db.prepare('SELECT inventory.next_piece_code() AS code FROM generate_series(1,?)').bind(quantity).all();
+ const rows:any[]=[],allocatedCodes=await db.prepare('SELECT inventory.next_piece_code() AS code FROM generate_series(1,?)').bind(quantity).all();
  for(const allocated of allocatedCodes.results){
   const id=uuid(),code=String((allocated as any).code);
-  const piece={id,code,company_id:company.id,product_id:product.id,lot_id:lotId,ownership:'EXTERNAL',journey:'OFFICE',holder:'OFFICE_PENDING',condition:'PENDING_LABEL_CONFIRMATION',label_confirmed_at:null,version:1,created_at:time,company_name:company.name,product_name:product.name,lot_number:number};
+  const piece={id,code,company_id:company.id,product_id:product.id,lot_id:lotId,ownership:'EXTERNAL',journey:'OFFICE',holder:'OFFICE_STOCK',condition:'FINISHED',label_confirmed_at:time,version:1,created_at:time,company_name:company.name,product_name:product.name,lot_number:number};
   rows.push(piece);
-  add("INSERT INTO pieces(id,code,company_id,product_id,lot_id,ownership,journey,holder,condition,version,created_at) VALUES(?,?,?,?,?,'EXTERNAL','OFFICE','OFFICE_PENDING','PENDING_LABEL_CONFIRMATION',1,?)",id,code,company.id,product.id,lotId,time);
-  event(piece,'OFFICE_VENDOR_REGISTERED',null,piece,`${referenceLabel}; handwritten code reserved for the physical tag`);
  }
- const tx=transaction('OFFICE_VENDOR_INTAKE',null,`Outside vendor ${company.name} · ${referenceLabel} · ${quantity} handwritten codes created`,rows);
+ add(`INSERT INTO pieces(id,code,company_id,product_id,lot_id,ownership,journey,holder,condition,label_confirmed_at,version,created_at) VALUES ${rows.map(()=>"(?,?,?,?,?,'EXTERNAL','OFFICE','OFFICE_STOCK','FINISHED',?,1,?)").join(',')}`,...rows.flatMap(piece=>[piece.id,piece.code,company.id,product.id,lotId,time,time]));
+ const tx=transaction('OFFICE_VENDOR_INTAKE',null,`Outside vendor ${company.name} · ${referenceLabel} · ${quantity} products added directly to office stock`,rows);
+ add(`INSERT INTO piece_events(id,piece_id,type,transaction_id,actor,created_at,reason,after_state) VALUES ${rows.map(()=>"(?,?,'OFFICE_VENDOR_REGISTERED',?,?,?,?,?)").join(',')}`,...rows.flatMap(piece=>[uuid(),piece.id,tx,actor,time,`${referenceLabel}; saved directly to office stock`,JSON.stringify(piece)]));
  return {ok:true,id:tx,lotId,count:quantity,codes:rows.map(p=>p.code)};
 }

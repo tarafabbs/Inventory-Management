@@ -43,7 +43,7 @@ export async function workshopOperation(ctx:any){
   const error=workshopError(p,op,v);if(error)throw fail(p.code+': '+error,409);
   if(op==='reprintOut'){line.outcome='OK';line.reason=line.reason?.trim()||`Reprint requested from ${String(p.condition).toLowerCase().replaceAll('_',' ')} status`;}
   const receiving=['reprintReceive','finishReceive'].includes(op),dispute=['groundDispute','stockDispute'].includes(op);
-  if(!receiving&&!dispute&&line.outcome!=='OK')throw fail('Confirm Condition OK / identity checked for each outgoing saree.');
+  if(!receiving&&!dispute&&line.outcome!=='OK')throw fail('Submit the normal movement or choose a problem-specific action.');
   if(receiving&&!['OK','DAMAGED','DISPUTED','NEEDS_REWORK'].includes(line.outcome))throw fail('Inspect every returned saree before confirmation.');
   if(dispute&&!['DAMAGED','DISPUTED'].includes(line.outcome))throw fail('Choose Damage or Dispute.');
   staged.push({p,line});

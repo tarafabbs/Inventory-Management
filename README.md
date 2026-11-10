@@ -2,7 +2,7 @@
 
 This is a Next.js application deployed on Vercel. It stays on the Vercel or custom domain and uses Supabase for Google authentication and PostgreSQL storage.
 
-The inventory tables live in the dedicated `inventory` schema of the existing Tarafabbs Supabase project. This keeps the inventory `products` and `users` separate from the storefront tables in `public`. Database writes remain transactional, and PostgreSQL triggers protect immutable four-character piece codes, custody rules, sequence numbers, and append-only history.
+The inventory tables live in the dedicated `inventory` schema of the existing Tarafabbs Supabase project. This keeps the inventory `products` and `users` separate from the storefront tables in `public`. Database writes remain transactional, and PostgreSQL triggers protect immutable 1–4 character piece codes, custody rules, sequence numbers, and append-only history.
 
 ## Supabase configuration
 
@@ -39,11 +39,11 @@ npm run db:migrate
 npm run dev
 ```
 
-The application includes receipts, unique four-character handwritten codes, manual code confirmation, saved entry drafts, handoffs, partial inspected returns, inventory and artisan balances, stock counts, exceptions, linked reversals and adjustments, staff roles, and CSV/print exports. No barcode, camera or scanner is used.
+The application includes direct-to-stock New Entry, unique 1–4 character handwritten codes, manual typing or optional on-device photo recognition, one-submit normal movements, handoffs, returns, inventory and artisan balances, stock counts, issue alerts, exceptions, linked reversals and adjustments, staff roles, and CSV/print exports. No barcode is used.
 
 ## Handwritten code recovery
 
-Code Recovery is available in Quick actions, All-in-one Code Entry, Code Entry, Office and piece details. Staff can search valid registered pieces or pending codes by original code, bill, lot, company, product or artist. A replacement requires a reason, physical identification evidence and confirmation of an exact match. The original four-character value is reused; recovery never changes stock, custody, condition, intake confirmation or piece version.
+Code Recovery is available in Quick actions, All-in-one Code Entry, Code Entry, Office and piece details. Staff can search valid registered pieces or legacy pending codes by original code, bill, lot, company, product or artist. A replacement requires a reason, physical identification evidence and confirmation of an exact match. The original permanent value is reused; recovery never changes stock, custody, condition, intake confirmation or piece version.
 
 Recovery requests persist until the replacement code is typed and confirmed, or cancelled with a reason. Unidentified physical items can be reported separately and matched later; they cannot create inventory. Closed records cannot be edited or deleted. Office roles can only recover pieces within their Office scope. Viewer access cannot create recoveries.
 
@@ -53,7 +53,7 @@ The recovery screen accepts any readable 2–4 character fragment from a damaged
 
 `Office Manager`, `Assistant Manager`, and `Office Staff` are office-only roles. They cannot open factory, workshop, artisan, warehouse, receipt or workspace-setting controls. Office Manager can grant and manage only `Office Staff` and `Assistant Manager` access; only Admin can manage every role and the complete system. Assistant Manager can create outside-vendor Office New Entries, while Office Staff retains the existing office code-entry actions.
 
-Office New Entry creates office-only vendors/products, a permanent `OFFICE` journey, and one handwritten code per accepted product. Those codes remain pending until written on the matching tag and manually confirmed. TaraFabbs workshop products continue to enter through Factory Finished Goods Received. The Office panel shows only current office inventory, sold products, eligible office returns, and their office movement history. An outside-vendor `OFFICE` journey is enforced by the database and cannot enter workshop or artisan processing.
+Office New Entry creates office-only vendors/products, a permanent `OFFICE` journey, and one handwritten code per accepted product. The products enter Office Inventory in the same atomic save; the generated values are then written on their tags. TaraFabbs workshop products continue to enter through Factory Finished Goods Received. The Office panel shows only current office inventory, sold products, eligible office returns, and their office movement history. An outside-vendor `OFFICE` journey is enforced by the database and cannot enter workshop or artisan processing.
 
 ## Role self-service
 

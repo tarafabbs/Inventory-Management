@@ -1,7 +1,15 @@
-// Code reservations are documents; only a physically checked manual submission creates inventory.
+// A New Entry creates permanent codes and puts the matching pieces in stock atomically.
 import {canEditPreparedReceipt} from './rules';
 
 const DEFAULT_OWN_COMPANY_ID='system-tarafabbs-own';
+const rowsSql=(count:number,template:string)=>Array.from({length:count},()=>template).join(',');
+function addDirectStock(ctx:any,rows:any[]){
+ if(!rows.length)return;
+ const {add,actor,time,uuid}=ctx;
+ add(`INSERT INTO generated_labels(id,code,company_id,product_id,lot_id,ownership,thanwala_id,state,created_at,registered_at) VALUES ${rowsSql(rows.length,"(?,?,?,?,?,?,?,'AVAILABLE',?,?)")}`,...rows.flatMap(row=>[row.id,row.code,row.company_id,row.product_id,row.lot_id,row.ownership,row.thanwala_id,time,time]));
+ add(`INSERT INTO pieces(id,code,company_id,product_id,lot_id,ownership,thanwala_id,holder,condition,label_confirmed_at,version,created_at) VALUES ${rowsSql(rows.length,"(?,?,?,?,?,?,?,'IN_HOUSE','AVAILABLE',?,1,?)")}`,...rows.flatMap(row=>[row.id,row.code,row.company_id,row.product_id,row.lot_id,row.ownership,row.thanwala_id,time,time]));
+ add(`INSERT INTO piece_events(id,piece_id,type,actor,created_at,reason,after_state) VALUES ${rowsSql(rows.length,"(?,?,'REGISTERED',?,?,?,?)")}`,...rows.flatMap(row=>[uuid(),row.id,actor,time,'New Entry saved directly to own stock',JSON.stringify({...row,holder:'IN_HOUSE',condition:'AVAILABLE',label_confirmed_at:time,version:1,created_at:time})]));
+}
 export async function intakeOperation(ctx:any){
  const {op,v,db,add,guard,event,move,transaction,user,actor,time,uuid,fail}=ctx;
  if(op==='updatePreparedReceipt'){
@@ -38,10 +46,12 @@ export async function intakeOperation(ctx:any){
   if(replacementCount){
    add('UPDATE companies SET sequence=sequence+? WHERE id=?',replacementCount,c.id);
    const allocated=await db.prepare('SELECT inventory.next_piece_code() AS code FROM generate_series(1,?)').bind(replacementCount).all();
+   const rows:any[]=[];
    for(const row of allocated.results){
     const code=String((row as any).code);codes.push(code);
-    add("INSERT INTO generated_labels(id,code,company_id,product_id,lot_id,ownership,thanwala_id,state,created_at) VALUES(?,?,?,?,?,?,?,'PENDING',?)",uuid(),code,c.id,product.id,lot.id,c.ownership,thanwala?.id||null,time);
+    rows.push({id:uuid(),code,company_id:c.id,product_id:product.id,lot_id:lot.id,ownership:c.ownership,thanwala_id:thanwala?.id||null});
    }
+   addDirectStock(ctx,rows);
   }
   return {ok:true,id:lot.id,count:replacementCount,codes,registered,regenerated:replacementCount>0};
  }
@@ -64,7 +74,7 @@ export async function intakeOperation(ctx:any){
   if(c.ownership==='EXTERNAL'&&v.thanwala_id)throw fail('Thanwala applies only to TaraFabbs Own Product.');
   guard('SELECT COUNT(*)=1 FROM companies WHERE id=? AND active=1',c.id);
   if(thanwala)guard('SELECT COUNT(*)=1 FROM thanwalas WHERE id=? AND active=1',thanwala.id);
-  const ids=[],codes:string[]=[];
+  const ids=[],codes:string[]=[],stockRows:any[]=[];
   for(const item of v.items){
    const product=await db.prepare('SELECT * FROM products WHERE id=? AND active=1').bind(item.product_id).first();if(!product)throw fail('Choose an active product for every line.');
    if(product.office_only===1)throw fail('Office-only vendors and products must use Office New Entry.');
@@ -74,9 +84,10 @@ export async function intakeOperation(ctx:any){
    const allocated=await db.prepare('SELECT inventory.next_piece_code() AS code FROM generate_series(1,?)').bind(item.quantity).all();
    for(const row of allocated.results){
     const code=String((row as any).code);codes.push(code);
-    add("INSERT INTO generated_labels(id,code,company_id,product_id,lot_id,ownership,thanwala_id,state,created_at) VALUES(?,?,?,?,?,?,?,'PENDING',?)",uuid(),code,c.id,product.id,id,c.ownership,thanwala?.id||null,time);
+    stockRows.push({id:uuid(),code,company_id:c.id,product_id:product.id,lot_id:id,ownership:c.ownership,thanwala_id:thanwala?.id||null,company_name:c.name,product_name:product.name,lot_number:number});
    }
   }
+  addDirectStock(ctx,stockRows);
   return {ok:true,count,ids,codes};
  }
  if(!['intake','supplierReturn','dispute'].includes(op))return null;
@@ -84,7 +95,7 @@ export async function intakeOperation(ctx:any){
  if(op==='intake'){
   const staged=[];
   for(const line of v.lines){
-   if(!['OK','DAMAGED'].includes(line.outcome))throw fail('Check Condition OK or Condition Damaged before inventory entry.');
+   if(!['OK','DAMAGED'].includes(line.outcome))throw fail('Choose damaged only when an old pending arrival has a problem.');
    if(line.outcome==='DAMAGED'&&!line.reason?.trim())throw fail('Describe why this saree is damaged.');
    const label=await db.prepare('SELECT g.*,c.name AS company_name,p.name AS product_name,l.number AS lot_number FROM generated_labels g JOIN companies c ON c.id=g.company_id JOIN products p ON p.id=g.product_id JOIN lots l ON l.id=g.lot_id WHERE g.id=?').bind(line.id).first();
    const legacy=label?.state==='PENDING'?null:await db.prepare("SELECT g.*,c.name AS company_name,p.name AS product_name,l.number AS lot_number FROM pieces g JOIN companies c ON c.id=g.company_id JOIN products p ON p.id=g.product_id JOIN lots l ON l.id=g.lot_id WHERE g.id=? AND g.condition='PENDING_LABEL_CONFIRMATION'").bind(line.id).first();

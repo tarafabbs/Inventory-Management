@@ -18,25 +18,26 @@ const modeInfo:Record<string,{title:string;description:string;permission:string;
 function Scanner({mode,d,action,busy,can,openPiece,initialCode='',onInitialCodeUsed}:any){
  const info=modeInfo[mode];
  const pieces=[...d.pieces,...d.generatedLabels.filter((p:any)=>p.journey==='OFFICE')];
- const [pending,setPending]=useState<any>(null),[confirmed,setConfirmed]=useState(false),[reason,setReason]=useState(''),[message,setMessage]=useState(''),[bad,setBad]=useState(false),[key,setKey]=useState(()=>crypto.randomUUID());
+ const [pending,setPending]=useState<any>(null),[reason,setReason]=useState(''),[message,setMessage]=useState(''),[bad,setBad]=useState(false),[key,setKey]=useState(()=>crypto.randomUUID());
  const disputed=['jobworkReturn','officeReturn','customerReturn'].includes(mode),factoryReceive=mode==='factoryReceive';
  const showHistory=(code:string)=>{const piece=pieces.find((p:any)=>p.code===code);if(!piece)return false;openPiece(piece);return true};
- function scan(code:string,source:string){
+ async function scan(code:string,source:string){
   const p=pieces.find((piece:any)=>piece.code===code.trim().toUpperCase());
   if(!p){setMessage('No registered product in this panel matches that code.');setBad(true);return}
   if(p.holder!==info.holder){setMessage(`${p.code} is not currently eligible for ${info.title}.`);setBad(true);return}
   if(mode==='officeLabel'&&(p.journey!=='OFFICE'||p.condition!=='PENDING_LABEL_CONFIRMATION')){setMessage(`${p.code} is not a pending outside-vendor office label.`);setBad(true);return}
   if(mode==='officeReceive'&&(p.journey==='OFFICE'||p.condition!=='FINISHED')){setMessage(`${p.code} did not come from the TaraFabbs workshop. Use Confirm New Office Code for an outside-vendor entry.`);setBad(true);return}
-  setPending({...p,source});setConfirmed(false);setReason('');setMessage('');setBad(false);
+  if(!disputed){const result=await action(mode,{id:p.id,version:p.version,received:factoryReceive?true:undefined},undefined,key);if(result){setKey(crypto.randomUUID());setMessage(`${p.code} submitted. Its location, inventory status and code history are updated.`);setBad(false)}return}
+  setPending({...p,source});setReason('');setMessage('');setBad(false);
  }
  useEffect(()=>{if(!initialCode||pending)return;onInitialCodeUsed?.();scan(initialCode,'all-in-one')},[initialCode,pending]);
  async function save(){
   if(!pending)return;
-  const result=await action(mode,{id:pending.id,version:pending.version,disputed:disputed?confirmed:undefined,received:factoryReceive?confirmed:undefined,reason:disputed?reason.trim():undefined},undefined,key);
-  if(result){const code=pending.code;setPending(null);setConfirmed(false);setReason('');setKey(crypto.randomUUID());setMessage(`${code} recorded. Its location, inventory status and code history are updated.`);setBad(false)}
+  const result=await action(mode,{id:pending.id,version:pending.version,disputed:disputed?true:undefined,received:factoryReceive?true:undefined,reason:disputed?reason.trim():undefined},undefined,key);
+  if(result){const code=pending.code;setPending(null);setReason('');setKey(crypto.randomUUID());setMessage(`${code} recorded. Its location, inventory status and code history are updated.`);setBad(false)}
  }
  const buttonLabel=mode==='jobworkReturn'?'Receive disputed company return':mode==='factoryReceive'?'Receive into factory inventory':mode==='officeLabel'?'Confirm code & add to office inventory':mode==='officeReceive'?'Submit to office inventory':mode==='officeSell'?'Mark Sold Out':mode==='officeReturn'?'Send dispute to workshop':'Send customer return to workshop';
- return <section className="panel scan-station"><div className="panel-heading"><div><h2>{info.title}</h2><p>{info.description}</p></div></div><div className="station-body"><ScannerInput onScan={scan} onHistory={showHistory} historyDisabled={busy} disabled={busy||!!pending||!can(info.permission)}/>{message&&<div className={bad?'form-error':'info-strip'} role="status">{message}</div>}{pending&&<div className="inspection-card"><h3 className="mono">{pending.code}</h3><p>{d.products.find((p:any)=>p.id===pending.product_id)?.name} · {d.companies.find((c:any)=>c.id===pending.company_id)?.name}</p>{(disputed||factoryReceive)&&<label className="checkbox disputed-confirm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>{factoryReceive?'Physical product received and dispute identity checked at factory':mode==='jobworkReturn'?'Disputed product physically returned from the original company':mode==='officeReturn'?'Office dispute checked and ready to return to workshop':'Customer dispute checked and ready to return to workshop'}</label>}{disputed&&<label className="field"><span>Dispute / return reason</span><textarea autoFocus rows={3} required value={reason} onChange={e=>setReason(e.target.value)} placeholder="Why is this product being returned?"/></label>}{!disputed&&!factoryReceive&&<div className="info-strip"><CheckCircle2 size={17}/>Confirm only after the handwritten tag code and product have been checked.</div>}<div className="button-row"><button className={'btn primary '+(disputed?'danger-button':'')} disabled={busy||(disputed||factoryReceive)&&!confirmed||disputed&&!reason.trim()} onClick={save}>{busy?'Saving…':buttonLabel}</button><button className="btn" disabled={busy} onClick={()=>setPending(null)}>Cancel entry</button></div></div>}<p className="secure-note">Every confirmed code entry writes a dated movement. Invalid stages and duplicates are blocked.</p></div></section>;
+ return <section className="panel scan-station"><div className="panel-heading"><div><h2>{info.title}</h2><p>{info.description}</p></div></div><div className="station-body"><ScannerInput knownCodes={pieces.map((piece:any)=>piece.code)} onScan={scan} onHistory={showHistory} historyDisabled={busy} disabled={busy||!!pending||!can(info.permission)}/>{message&&<div className={bad?'form-error':'info-strip'} role="status">{message}</div>}{pending&&<div className="inspection-card"><h3 className="mono">{pending.code}</h3><p>{d.products.find((p:any)=>p.id===pending.product_id)?.name} · {d.companies.find((c:any)=>c.id===pending.company_id)?.name}</p>{disputed&&<label className="field"><span>Dispute / return reason</span><textarea autoFocus rows={3} required value={reason} onChange={e=>setReason(e.target.value)} placeholder="Why is this product being returned?"/></label>}<div className="info-strip"><CheckCircle2 size={17}/>Submitting this code completes the selected movement. Use a dispute action only when there is a problem.</div><div className="button-row"><button className={'btn primary '+(disputed?'danger-button':'')} disabled={busy||disputed&&!reason.trim()} onClick={save}>{busy?'Saving…':buttonLabel}</button><button className="btn" disabled={busy} onClick={()=>setPending(null)}>Cancel entry</button></div></div>}<p className="secure-note">Every submitted code writes a dated movement. Invalid stages and duplicates are blocked.</p></div></section>;
 }
 
 function PagedTable({title,rows,headers,renderRow,searchText,empty}:any){
@@ -48,7 +49,7 @@ function PagedTable({title,rows,headers,renderRow,searchText,empty}:any){
 }
 
 export default function DispatchOfficeFlow({audience='factory',d,action,busy,can,openPiece,initialMode='ALL',initialCode='',onInitialCodeUsed}:any){
- const modes=Object.entries(modeInfo).filter(([,info])=>info.audience===audience&&can(info.permission));
+ const modes=Object.entries(modeInfo).filter(([id,info])=>info.audience===audience&&can(info.permission)&&(id!=='officeLabel'||d.generatedLabels.some((piece:any)=>piece.journey==='OFFICE')));
  const first=modes.some(([id])=>id===initialMode)?initialMode:modes[0]?.[0]||'';
  const [mode,setMode]=useState(first);
  const {history,movementIndex}=useMemo(()=>{
