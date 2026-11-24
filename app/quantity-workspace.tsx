@@ -1,13 +1,17 @@
 'use client';
 
 import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
-import {ArrowDownLeft, ArrowUpRight, ClipboardList, LayoutDashboard, Package, Plus, Wrench} from 'lucide-react';
-import {artisanWorkTypes, permitted} from '@/lib/rules';
+import {ArrowDownLeft, ArrowUpRight, ClipboardList, Database, LayoutDashboard, Menu, Package, Plus, ShieldCheck, Store, Wrench, X} from 'lucide-react';
+import {artisanWorkTypes, canEditOfficeEntry, isManagement, isOwner, permitted, roleLabel} from '@/lib/rules';
 import {
-  issueEditWindow, maxStockQuantity, stageLabels, stockAvailable, stockOperations, trackedArtisan,
+  issueEditWindow, maxStockQuantity, needsDisputeReason, officeOperations, ownsOfficeTransfer,
+  stageLabels, stockAvailable, stockOperations, trackedArtisan,
   type StockHistory, type StockMaster, type StockOperation, type StockSnapshot, type StockStage,
 } from '@/lib/quantity-stock';
 import SignOutButton from './sign-out-button';
+import StaffManagement from './staff-management';
+import AdminDataControl from './admin-data-control';
+import OfficeCatalog from './office-catalog';
 import './quantity-workspace.css';
 
 const navigation = [
@@ -18,7 +22,19 @@ const navigation = [
   ['manage', 'Repair & Delivery', Wrench],
   ['history', 'History', ClipboardList],
 ] as const;
-type Screen = typeof navigation[number][0];
+const officeNavigation = [
+  ['dashboard','Office Inventory',Store],
+  ['office-move','Office Movements',ArrowDownLeft],
+  ['office-vendor','Office New Entry',Plus],
+  ['history','Office History',ClipboardList],
+  ['office-catalog','Office Records',Database],
+] as const;
+const managementNavigation = [
+  ['staff','Staff Access',ShieldCheck],
+  ['data','Data Control',Database],
+] as const;
+type Screen = typeof navigation[number][0] | typeof officeNavigation[number][0] | typeof managementNavigation[number][0];
+type MovementScreen = 'receipt'|'issue'|'receive'|'manage'|'office-move'|'office-vendor';
 type Save = (body: Record<string, unknown>, key: string) => Promise<void>;
 type Masters = 'companies' | 'products' | 'thanwalas' | 'artisans';
 const masterLabels = {companies: 'Company', products: 'Category', thanwalas: 'Thanwala', artisans: 'Artisan'};
@@ -27,10 +43,11 @@ const today = () => new Date().toLocaleDateString('en-CA', {timeZone: 'Asia/Kolk
 const editUntil = (row: StockHistory) => Date.parse(row.created_at) + issueEditWindow;
 const name = (items: StockMaster[], id: string | null) => items.find(item => item.id === id)?.name || '—';
 const movementLabel = (row: StockHistory) => row.kind === 'legacy' ? row.notes
-  : row.kind === 'issue_edit' ? 'Handoff quantity edited' : stockOperations[row.kind].label;
+  : row.kind === 'issue_edit' ? 'Handoff quantity edited' : row.kind==='office_entry_edit'
+    ? 'Office entry corrected' : stockOperations[row.kind].label;
 
 const extraOperations: StockOperation[] = [
-  'dispatch', 'mark_repair', 'send_repair', 'receive_repaired', 'mark_dispute',
+  'dispatch', 'send_office','receive_factory_return','mark_repair', 'send_repair', 'receive_repaired', 'mark_dispute',
   'raw_dispute', 'repair_dispute', 'resolve_dispute', 'dispute_return', 'accept_pending',
 ];
 
@@ -41,7 +58,7 @@ async function requestJson(url: string, init?: RequestInit) {
   return data;
 }
 
-export default function QuantityWorkspace() {
+export default function QuantityWorkspace({office = false}: {office?:boolean}) {
   const [data, setData] = useState<StockSnapshot | null>(null);
   const [screen, setScreen] = useState<Screen>('dashboard');
   const [company, setCompany] = useState('');
@@ -50,6 +67,8 @@ export default function QuantityWorkspace() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [adminBusy,setAdminBusy] = useState(false);
+  const menu = useRef<HTMLDialogElement>(null);
   const latestRead = useRef(0);
 
   const refresh = useCallback(async (offset: number, filter: string) => {
@@ -57,19 +76,21 @@ export default function QuantityWorkspace() {
     setLoading(true);
     setError('');
     try {
-      const result = await requestJson('/api/quantity-stock?' + new URLSearchParams({page: String(offset), company: filter}));
+      const result = await requestJson('/api/quantity-stock?' + new URLSearchParams({page: String(offset), company: filter, view: office ? 'office' : 'workshop'}));
       if (request === latestRead.current) setData(result);
     } catch (error) {
       if (request === latestRead.current) setError(error instanceof Error ? error.message : 'Could not load stock.');
     } finally {
       if (request === latestRead.current) setLoading(false);
     }
-  }, []);
+  }, [office]);
 
   useEffect(() => {void refresh(page, historyCompany);}, [page, historyCompany, refresh]);
 
   const go = (next: Screen) => {
+    menu.current?.close();
     setNotice('');
+    setError('');
     setScreen(next);
   };
 
@@ -81,11 +102,33 @@ export default function QuantityWorkspace() {
     await refresh(page, historyCompany);
   };
 
-  async function addMaster(kind: Masters, entryName: string, workType: string, description: string) {
+  async function ledgerAction(operation: string, body: Record<string, unknown>) {
+    return requestJson('/api/ledger', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({op:operation,key:crypto.randomUUID(),data:body}),
+    });
+  }
+
+  async function adminAction(operation: string, body: Record<string, unknown>) {
+    setAdminBusy(true);setError('');setNotice('');
+    try {
+      const result = await ledgerAction(operation,body);
+      setNotice(result.message || 'Data Control change saved.');
+      await refresh(page,historyCompany);
+      return result;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save Data Control change.');
+      return null;
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  async function addMaster(kind: Masters, entryName: string, workType: string, description: string, ownership: string) {
     const result = await requestJson('/api/ledger', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({op: 'master', key: crypto.randomUUID(), data: {
-        kind, name: entryName, ...(kind === 'companies' ? {ownership: 'EXTERNAL'} : {}),
+      body: JSON.stringify({op: office ? 'officeMasterCreate' : 'master', key: crypto.randomUUID(), data: {
+        kind, name: entryName, ...(kind === 'companies' ? {ownership} : {}),
         ...(kind === 'artisans' ? {work_type: workType, work_description: description} : {}),
       }}),
     });
@@ -94,7 +137,12 @@ export default function QuantityWorkspace() {
   }
 
   const role = data?.user.role || '';
-  const shownTabs = navigation.filter(([key]) => (
+  const shownTabs = [...(office ? officeNavigation : navigation), ...managementNavigation].filter(([key]) => (
+    key === 'staff' ? isOwner(role) :
+    key === 'data' ? permitted(role,'manageData') :
+    key === 'office-vendor' ? permitted(role,'officeEntry') :
+    key === 'office-catalog' ? permitted(role,'officeMaster') :
+    key === 'office-move' ? permitted(role,'officeReceive') :
     key === 'receipt' ? permitted(role,'receipt') :
     key === 'issue' ? permitted(role,'handoff') :
     key === 'receive' ? permitted(role,'return') :
@@ -103,21 +151,40 @@ export default function QuantityWorkspace() {
 
   return <div className="qty-app">
     <header className="qty-header">
-      <div className="qty-brand"><span><Package size={22}/></span><div><strong>IMS TARA MAA</strong><small>Stock management</small></div></div>
-      <div className="qty-account">{data && <><span>{data.user.name}</span>{role === 'Admin' && <a href="/?view=Office">Office</a>}</>}<SignOutButton/></div>
+      <div className="qty-brand"><button type="button" className="qty-menu-button" aria-label="Open side menu" aria-haspopup="dialog" onClick={() => menu.current?.showModal()}><Menu size={22}/></button>
+        <div><strong>IMS TARA MAA</strong><small>{office ? 'Office inventory' : 'Workshop stock'}</small></div></div>
+      {data && <div className="qty-account"><span>{data.user.name} · {roleLabel(role)}</span></div>}
     </header>
+    <dialog className="qty-menu" ref={menu} aria-labelledby="qty-menu-title" onClick={event => {if(event.target===event.currentTarget)menu.current?.close();}}>
+      <div className="qty-menu-body">
+        <header><div><strong id="qty-menu-title">IMS TARA MAA</strong><small>{data ? `${data.user.name} · ${roleLabel(role)}` : 'Inventory workspace'}</small></div>
+          <button type="button" aria-label="Close side menu" onClick={() => menu.current?.close()}><X size={19}/></button></header>
+        <nav aria-label="Side menu">
+          {shownTabs.map(([key,label,Icon]) => <button type="button" key={key} aria-current={screen===key ? 'page' : undefined} onClick={() => go(key)}><Icon size={18}/>{label}</button>)}
+          {isManagement(role) && <a href={office ? '/' : '/?view=Office'}>{office ? <Package size={18}/> : <Store size={18}/>}
+            {office ? 'Workshop stock' : 'Office inventory'}</a>}
+        </nav>
+        <footer><SignOutButton/></footer>
+      </div>
+    </dialog>
     <nav className="qty-nav" aria-label="Inventory navigation">
-      {shownTabs.map(([key,label,Icon]) => <button type="button" key={key} aria-current={screen === key ? 'page' : undefined} onClick={() => go(key)}><Icon size={18}/>{label}</button>)}
+      {shownTabs.filter(([key]) => key!=='staff' && key!=='data').map(([key,label,Icon]) => <button type="button" key={key} aria-current={screen === key ? 'page' : undefined} onClick={() => go(key)}><Icon size={18}/>{label}</button>)}
     </nav>
     <main className="qty-main" aria-busy={loading}>
       {error && <p className="qty-status bad" role="alert">{error} <button type="button" onClick={() => void refresh(page, historyCompany)}>Reload stock</button></p>}
       {notice && <p className="qty-status" role="status">{notice}</p>}
       {!data && !error && <p role="status">Loading stock…</p>}
-      {data && screen === 'dashboard' && <Dashboard data={data} company={company} setCompany={setCompany} onAction={go}/>}
-      {data && ['receipt','issue','receive','manage'].includes(screen) && <MovementForm key={screen} screen={screen as Exclude<Screen,'dashboard'|'history'>}
+      {data && screen === 'dashboard' && (office
+        ? <OfficeDashboard data={data} company={company} setCompany={setCompany} onAction={go}/>
+        : <Dashboard data={data} company={company} setCompany={setCompany} onAction={go}/>)}
+      {data && ['receipt','issue','receive','manage','office-move','office-vendor'].includes(screen) && <MovementForm key={screen} screen={screen as MovementScreen}
         data={data} initialCompany={company} save={save} addMaster={addMaster} loading={loading}/>}
       {data && screen === 'history' && <History data={data} page={page} setPage={setPage} company={historyCompany} setCompany={id => {setPage(0);setHistoryCompany(id);}}
-        loading={loading} save={save}/>}
+        loading={loading} save={save} office={office}/>}
+      {data && screen === 'staff' && isOwner(role) && <StaffManagement currentUser={data.user.id} request={requestJson} save={values => ledgerAction('user',values)}/>}
+      {data && screen === 'office-catalog' && permitted(role,'officeMaster') && <OfficeCatalog request={requestJson}
+        save={async values=>{await ledgerAction('officeMasterEdit',values);await refresh(page,historyCompany);}}/>}
+      {data && screen === 'data' && permitted(role,'manageData') && <AdminDataControl action={adminAction} busy={adminBusy} canDelete={isOwner(role)}/>}
     </main>
   </div>;
 }
@@ -146,7 +213,7 @@ function Dashboard({data, company, setCompany, onAction}: {
   }
   const rows = Array.from(lookup.values()).sort((a,b) =>
     name(data.companies,a.company).localeCompare(name(data.companies,b.company)) || name(data.products,a.product).localeCompare(name(data.products,b.product)));
-  const due = (row: typeof rows[number]) => Math.max(0, row.received - (row.stages.delivered || 0) - (row.stages.dispute_returned || 0) - (row.stages.office || 0));
+  const due = (row: typeof rows[number]) => Math.max(0, row.received - (row.stages.delivered || 0) - (row.stages.dispute_returned || 0));
   const sumStage = (stage: StockStage) => rows.reduce((total,row) => total + (row.stages[stage] || 0),0);
   const cards = [
     ['Raw stock', sumStage('raw')],
@@ -179,7 +246,9 @@ function Dashboard({data, company, setCompany, onAction}: {
           ['Disputed in stock',stage.disputed], ['Dispute returned to company',stage.dispute_returned],
           ['Delivered to company',stage.delivered],
           ...((stage.pending || stage.review) ? [['Legacy stock to review',(stage.pending || 0)+(stage.review || 0)]] : []),
-          ...(stage.office ? [['Transferred to office',stage.office]] : []),
+          ...((stage.office_pending || stage.office_stock || stage.office_sold)
+            ? [['Transferred to Office',(stage.office_pending || 0)+(stage.office_stock || 0)+(stage.office_sold || 0)]] : []),
+          ...(stage.factory_return_pending ? [['Awaiting workshop receipt',stage.factory_return_pending]] : []),
         ].map(([label,quantity]) => <div key={label}><dt>{label}</dt><dd>{count(Number(quantity || 0))}</dd></div>)}</dl>
       </section>;
     })}</div>
@@ -192,12 +261,50 @@ function Dashboard({data, company, setCompany, onAction}: {
   </>;
 }
 
-function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
-  screen: 'receipt' | 'issue' | 'receive' | 'manage'; data: StockSnapshot; initialCompany: string;
-  save: Save; addMaster: (kind: Masters, name: string, workType: string, description: string) => Promise<string>; loading: boolean;
+function OfficeDashboard({data,company,setCompany,onAction}: {
+  data: StockSnapshot; company: string; setCompany: (id:string) => void; onAction: (screen:Screen) => void;
 }) {
-  const manageChoices = extraOperations.filter(key => permitted(data.user.role,stockOperations[key].permission));
-  const [kind,setKind] = useState<StockOperation>(screen === 'manage' ? manageChoices[0] || 'dispatch' : screen);
+  const stages = ['office_pending','office_stock','office_sold','factory_return_pending'] as const;
+  const balances = data.balances.filter(row => !company || row.company_id === company);
+  const groups = new Map<string,{companyId:string; productId:string; stages:Partial<Record<StockStage,number>>}>();
+  for (const balance of balances) {
+    const id=JSON.stringify([balance.company_id,balance.product_id]);
+    const row=groups.get(id) || {companyId:balance.company_id,productId:balance.product_id,stages:{}};
+    row.stages[balance.stage]=balance.quantity;
+    groups.set(id,row);
+  }
+  return <>
+    <div className="qty-title"><div><h1>Office Inventory</h1><p>Workshop receipts, office stock, sales and returns.</p></div>
+      <label className="qty-field compact"><span>Company / vendor</span><select value={company} onChange={event=>setCompany(event.target.value)}>
+        <option value="">All companies</option>{data.companies.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+      </select></label></div>
+    <div className="qty-cards">{stages.map(stage=><div key={stage}><span>{stageLabels[stage]}</span><strong>{count(balances.filter(row=>row.stage===stage).reduce((sum,row)=>sum+row.quantity,0))} <small>pcs</small></strong></div>)}</div>
+    <div className="qty-quick">
+      <button type="button" className="qty-primary" onClick={()=>onAction('office-move')}><ArrowDownLeft size={17}/>Office Movements</button>
+      {permitted(data.user.role,'officeEntry') && <button type="button" onClick={()=>onAction('office-vendor')}><Plus size={17}/>Office New Entry</button>}
+    </div>
+    {!groups.size && <p className="qty-empty">No stock has been sent to Office for this selection.</p>}
+    <div className="qty-category-grid">{Array.from(groups.entries()).map(([id,row])=><section className="qty-category" key={id}>
+      <header><div><small>{name(data.companies,row.companyId)}</small><h2>{name(data.products,row.productId)}</h2></div></header>
+      <dl>{[...stages,...(row.stages.office_vendor_pending ? ['office_vendor_pending' as const] : [])].map(stage=><div key={stage}>
+        <dt>{stageLabels[stage]}</dt><dd>{count(row.stages[stage] || 0)}</dd></div>)}</dl>
+    </section>)}</div>
+  </>;
+}
+
+function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
+  screen: MovementScreen; data: StockSnapshot; initialCompany: string;
+  save: Save; addMaster: (kind: Masters, name: string, workType: string, description: string, ownership: string) => Promise<string>; loading: boolean;
+}) {
+  const officeMove = screen === 'office-move';
+  const choices = (officeMove ? officeOperations.filter(key => key !== 'office_vendor_receipt') : extraOperations)
+    .filter(key => permitted(data.user.role,stockOperations[key].permission));
+  const [kind,setKind] = useState<StockOperation>(() => {
+    if (officeMove) return choices[0] || 'office_receive';
+    if (screen === 'office-vendor') return 'office_vendor_receipt';
+    if (screen === 'manage') return choices[0] || 'dispatch';
+    return screen;
+  });
   const [company,setCompany] = useState(initialCompany);
   const [product,setProduct] = useState('');
   const [artisan,setArtisan] = useState('');
@@ -212,6 +319,7 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
   const [masterName,setMasterName] = useState('');
   const [workType,setWorkType] = useState('');
   const [workDescription,setWorkDescription] = useState('');
+  const [ownership,setOwnership] = useState('EXTERNAL');
   const key = useRef('');
   const savingRef = useRef(false);
   const operation = stockOperations[kind];
@@ -221,16 +329,20 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
   const hasQuantity = Number.isInteger(number) && number > 0 && number <= maxStockQuantity;
   const exceed = operation.from !== null && number > countInStock;
   const own = data.companies.find(item => item.id === company)?.ownership === 'OWN';
-  const reasonRequired = operation.to === 'disputed' || kind === 'dispute_return';
-  const canCreate = kind === 'receipt' && permitted(data.user.role,'masterCreate');
+  const reasonRequired = needsDisputeReason(kind);
+  const vendor = kind === 'office_vendor_receipt';
+  const isReceipt = kind === 'receipt' || vendor;
+  const canCreate = vendor ? permitted(data.user.role,'officeMaster') : kind === 'receipt' && permitted(data.user.role,'masterCreate');
   const canCreateArtisan = ['issue','send_repair'].includes(kind) && permitted(data.user.role,'masterCreate');
   const validMaster = masterName.trim() && (newMaster !== 'artisans'
     || (workType && (workType !== 'Others' || workDescription.trim())));
   const inStock = (companyId: string, productId?: string) => data.balances.some(row => row.company_id === companyId
     && (!productId || row.product_id === productId) && row.stage === operation.from && row.quantity > 0);
   const companies = data.companies.filter(item => (kind !== 'dispatch' || item.ownership === 'EXTERNAL')
-    && (kind === 'receipt' ? item.active : inStock(item.id)));
-  const products = data.products.filter(item => kind === 'receipt' ? item.active : inStock(company,item.id));
+    && (!ownsOfficeTransfer(kind) || item.ownership === 'OWN')
+    && (isReceipt ? item.active && (vendor ? item.office_only === 1 : !item.office_only) : inStock(item.id)));
+  const products = data.products.filter(item => isReceipt
+    ? item.active && (vendor ? item.office_only === 1 : !item.office_only) : inStock(company,item.id));
   const artisans = data.artisans.filter(item => trackedArtisan(operation.from,item.id)
     ? stockAvailable(data.balances,company,product,operation.from,item.id) > 0 : item.active);
   const valid = companies.some(item => item.id === company) && products.some(item => item.id === product) && hasQuantity
@@ -266,7 +378,7 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
     setSaving(true);
     setError('');
     try {
-      const id = await addMaster(newMaster,masterName.trim(),workType,workDescription.trim());
+      const id = await addMaster(newMaster,masterName.trim(),workType,workDescription.trim(),ownership);
       if (newMaster === 'companies') {setCompany(id);setThanwala('');}
       if (newMaster === 'products') setProduct(id);
       if (newMaster === 'thanwalas') setThanwala(id);
@@ -281,19 +393,20 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
   }
 
   const createButton = (kind: Masters) => (kind === 'artisans' ? canCreateArtisan : canCreate)
-    && <button type="button" className="qty-small" onClick={() => {setNewMaster(kind);setMasterName('');setWorkType('');setWorkDescription('');setError('');}}><Plus size={15}/>Add {masterLabels[kind].toLowerCase()}</button>;
+    && <button type="button" className="qty-small" onClick={() => {setNewMaster(kind);setMasterName('');setWorkType('');setWorkDescription('');setOwnership('EXTERNAL');setError('');}}><Plus size={15}/>Add {vendor && kind==='companies' ? 'vendor' : masterLabels[kind].toLowerCase()}</button>;
   return <div className="qty-work">
-    <div className="qty-title"><div><h1>{screen === 'manage' ? 'Repair & Delivery' : stockOperations[screen].label}</h1>
+    <div className="qty-title"><div><h1>{screen === 'manage' ? 'Repair & Delivery' : officeMove ? 'Office Movements' : stockOperations[kind].label}</h1>
       <p>{screen === 'receipt' ? 'Add received pieces to raw stock.' : screen === 'issue' ? 'Choose a company, category and artisan to issue raw stock.'
-        : screen === 'receive' ? 'Record returned work in its own stock balance.' : 'Record repair, disputes and delivery against the company’s balance.'}</p></div></div>
+        : screen === 'receive' ? 'Record returned work in its own stock balance.' : officeMove ? 'Receive from the workshop, mark sales, or send disputed Own Products back.'
+        : vendor ? 'Enter the pieces received from an outside vendor.' : 'Record repair, disputes and delivery against the company’s balance.'}</p></div></div>
     <form className="qty-panel qty-form" onSubmit={submit}>
       <fieldset disabled={saving || loading}>
-        {(screen === 'manage' || screen === 'receive') && <label className="qty-field"><span>{screen === 'receive' ? 'Return status' : 'Action'}</span><select value={kind} onChange={event => {setKind(event.target.value as StockOperation);setArtisan('');changed();}}>
-          {(screen === 'receive' ? ['receive','receive_repair','receive_dispute'] as const : manageChoices).map(key =>
+        {(screen === 'manage' || screen === 'receive' || officeMove) && <label className="qty-field"><span>{screen === 'receive' ? 'Return status' : 'Action'}</span><select value={kind} onChange={event => {setKind(event.target.value as StockOperation);setProduct('');setArtisan('');setQuantity('');setNotes('');changed();}}>
+          {(screen === 'receive' ? ['receive','receive_repair','receive_dispute'] as const : choices).map(key =>
             <option key={key} value={key}>{screen === 'receive' ? ({receive:'Ready for company',receive_repair:'Needs repair',receive_dispute:'Disputed'} as Record<string,string>)[key] : stockOperations[key].label}</option>)}
         </select></label>}
         <div className="qty-fields">
-          <div><label className="qty-field"><span>Company / party</span><select value={company} required onChange={event => {setCompany(event.target.value);setProduct('');setArtisan('');setThanwala('');changed();}}>
+          <div><label className="qty-field"><span>{vendor ? 'Outside vendor' : 'Company / party'}</span><select value={company} required onChange={event => {setCompany(event.target.value);setProduct('');setArtisan('');setThanwala('');changed();}}>
             <option value="">Select company</option>{companies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select></label>{createButton('companies')}</div>
           <div><label className="qty-field"><span>Product category</span><select required value={product} onChange={event => {setProduct(event.target.value);setArtisan('');changed();}}>
@@ -308,6 +421,9 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
         </div>
         {newMaster && <div className="qty-inline">
           <label className="qty-field"><span>{masterLabels[newMaster]} name</span><input autoFocus maxLength={120} value={masterName} onChange={event => setMasterName(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') {event.preventDefault();void create();}}}/></label>
+          {newMaster === 'companies' && !vendor && <label className="qty-field"><span>Source type</span><select value={ownership} onChange={event => setOwnership(event.target.value)}>
+            <option value="EXTERNAL">Jobwork company</option><option value="OWN">TaraFabbs Own Product</option>
+          </select></label>}
           {newMaster === 'artisans' && <label className="qty-field"><span>Work type</span><select value={workType} onChange={event => setWorkType(event.target.value)}>
             <option value="">Select work type</option>{artisanWorkTypes.map(type => <option key={type}>{type}</option>)}
           </select></label>}
@@ -315,13 +431,13 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
           <button type="button" onClick={() => setNewMaster(null)}>Cancel</button>
           <button type="button" className="qty-primary" disabled={!validMaster} onClick={() => void create()}>Add & select</button>
         </div>}
-        {!companies.length && kind !== 'receipt' && <p className="qty-empty">No company has stock available for this action.</p>}
+        {!companies.length && !isReceipt && <p className="qty-empty">No company has stock available for this action.</p>}
         <div className="qty-fields">
           {operation.from && <div className="qty-figure"><span>{stageLabels[operation.from]} available</span><strong>{count(countInStock)} pcs</strong></div>}
           <label className="qty-field"><span>Quantity (pcs)</span><input required inputMode="numeric" type="number" min={1} max={maxStockQuantity} step={1} value={quantity} placeholder="0" onChange={event => {setQuantity(event.target.value);changed();}}/></label>
           {operation.from && <div className={'qty-figure ' + (exceed ? 'bad' : '')} aria-live="polite"><span>Balance after saving</span><strong>{exceed ? 'Insufficient stock' : `${count(countInStock - (hasQuantity ? number : 0))} pcs`}</strong></div>}
         </div>
-        {kind === 'receipt' && <div className="qty-fields">
+        {isReceipt && <div className="qty-fields">
           <label className="qty-field"><span>Arrival date</span><input type="date" required value={date} onChange={event => {setDate(event.target.value);changed();}}/></label>
           <label className="qty-field"><span>Bill / challan (optional)</span><input maxLength={200} value={reference} onChange={event => {setReference(event.target.value);changed();}}/></label>
         </div>}
@@ -333,11 +449,12 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
   </div>;
 }
 
-function History({data,page,setPage,company,setCompany,loading,save}: {
+function History({data,page,setPage,company,setCompany,loading,save,office}: {
   data: StockSnapshot; page: number; setPage: (page: number) => void; company: string; setCompany: (id: string) => void;
-  loading: boolean; save: Save;
+  loading: boolean; save: Save; office: boolean;
 }) {
   const [editing,setEditing] = useState<StockHistory | null>(null);
+  const [officeEdit,setOfficeEdit] = useState<StockHistory|null>(null);
   const [quantity,setQuantity] = useState('');
   const [error,setError] = useState('');
   const [saving,setSaving] = useState(false);
@@ -345,7 +462,7 @@ function History({data,page,setPage,company,setCompany,loading,save}: {
   const key = useRef('');
   const date = (value: string) => new Date(value).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kolkata'});
   const eligible = (row: StockHistory) => row.kind === 'issue' && editUntil(row) > Date.now() && permitted(data.user.role,'handoff')
-    && (['Admin','Supervisor'].includes(data.user.role) || row.actor_id === data.user.id);
+    && (isManagement(data.user.role) || data.user.role==='Supervisor' || row.actor_id === data.user.id);
   const delta = editing ? Number(quantity) - editing.quantity : 0;
   const raw = editing ? stockAvailable(data.balances,editing.company_id,editing.product_id,'raw',null) : 0;
   const outstanding = editing ? stockAvailable(data.balances,editing.company_id,editing.product_id,'artisan',editing.artisan_id) : 0;
@@ -368,8 +485,8 @@ function History({data,page,setPage,company,setCompany,loading,save}: {
     }
   }
   return <>
-    <div className="qty-title"><div><h1>Stock History</h1><p>Handoff quantities are editable for seven days.</p></div>
-      <label className="qty-field compact"><span>Company</span><select disabled={loading || saving} value={company} onChange={event => {setEditing(null);setCompany(event.target.value);}}>
+    <div className="qty-title"><div><h1>{office ? 'Office History' : 'Stock History'}</h1><p>{office ? 'Receipts, sales and returns with the name of the staff member who saved each entry.' : 'Handoff quantities are editable for seven days.'}</p></div>
+      <label className="qty-field compact"><span>Company</span><select disabled={loading || saving || !!officeEdit} value={company} onChange={event => {setEditing(null);setCompany(event.target.value);}}>
         <option value="">All companies</option>{data.companies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label></div>
     <section className="qty-panel qty-history">
@@ -377,10 +494,13 @@ function History({data,page,setPage,company,setCompany,loading,save}: {
       <ul>{data.history.map(row => <li key={row.id}>
         <div className="qty-history-line"><div><strong>{movementLabel(row)}</strong>
           <small>{name(data.companies,row.company_id)} · {name(data.products,row.product_id)}{row.artisan_id ? ' · ' + name(data.artisans,row.artisan_id) : ''}</small>
-          <small>{date(row.created_at)} · {row.actor}{row.reference ? ' · Bill ' + row.reference : ''}{row.received_on ? ' · Arrival ' + row.received_on : ''}</small>
+          <small>{date(row.created_at)} · {row.actor}{row.actor_role ? ' · ' + row.actor_role : ''}{row.reference ? ' · Bill ' + row.reference : ''}{row.received_on ? ' · Arrival ' + row.received_on : ''}</small>
           {row.kind !== 'legacy' && row.notes && <small>{row.notes}</small>}</div>
           <div><b>{row.kind === 'issue_edit' ? `${row.previous_quantity} → ${row.new_quantity}` : count(row.quantity)} pcs</b>
+            {office && row.kind==='office_vendor_receipt' && permitted(data.user.role,'officeEdit')
+              && canEditOfficeEntry(data.user.role,row.created_at) && <button type="button" disabled={loading||!!officeEdit} onClick={()=>setOfficeEdit(row)}>Edit receipt details</button>}
             {eligible(row) && <button type="button" disabled={saving || loading} onClick={() => {setEditing(row);setQuantity(String(row.quantity));setError('');key.current='';}}>Edit quantity</button>}</div></div>
+        {officeEdit?.id===row.id && <OfficeReceiptEditor row={officeEdit} save={save} close={()=>setOfficeEdit(null)}/>}
         {editing?.id === row.id && <form className="qty-inline" onSubmit={submit}>
           <label className="qty-field"><span>Correct quantity</span><input autoFocus type="number" inputMode="numeric" step={1} min={1} max={maxStockQuantity} disabled={saving} value={quantity} onChange={event => {setQuantity(event.target.value);key.current='';}}/></label>
           <p>{delta > raw || -delta > outstanding ? 'This change exceeds the available balance.' : `Raw after saving: ${count(raw-delta)} pcs · With artisan: ${count(outstanding+delta)} pcs`}</p>
@@ -389,8 +509,38 @@ function History({data,page,setPage,company,setCompany,loading,save}: {
           {error && <p className="qty-status bad" role="alert">{error}</p>}
         </form>}
       </li>)}</ul>
-      <footer><button type="button" disabled={page === 0 || loading || saving} onClick={() => {setEditing(null);setPage(page-1);}}>Previous</button>
-        <span>Page {page + 1}</span><button type="button" disabled={!data.more || loading || saving} onClick={() => {setEditing(null);setPage(page+1);}}>Next</button></footer>
+      <footer><button type="button" disabled={page === 0 || loading || saving || !!officeEdit} onClick={() => {setEditing(null);setPage(page-1);}}>Previous</button>
+        <span>Page {page + 1}</span><button type="button" disabled={!data.more || loading || saving || !!officeEdit} onClick={() => {setEditing(null);setPage(page+1);}}>Next</button></footer>
     </section>
   </>;
+}
+
+function OfficeReceiptEditor({row,save,close}: {row:StockHistory;save:Save;close:()=>void}) {
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const key=useRef('');
+  async function submit(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);setError('');
+    const fields=Object.fromEntries(new FormData(event.currentTarget));
+    key.current ||= crypto.randomUUID();
+    try {
+      await save({kind:'office_entry_edit',id:row.id,...fields,
+        expected:{received_on:row.received_on,reference:row.reference,notes:row.notes}},key.current);
+      close();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not update the receipt.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <form className="qty-inline" onSubmit={submit} onChange={()=>{key.current='';}}>
+    <label className="qty-field"><span>Arrival date</span><input name="receivedOn" type="date" required disabled={busy} defaultValue={row.received_on||''}/></label>
+    <label className="qty-field"><span>Bill / challan</span><input name="reference" disabled={busy} maxLength={200} defaultValue={row.reference}/></label>
+    <label className="qty-field"><span>Notes</span><input name="notes" disabled={busy} maxLength={1000} defaultValue={row.notes}/></label>
+    <label className="qty-field"><span>Correction reason</span><input name="reason" required minLength={3} maxLength={1000} disabled={busy}/></label>
+    <button type="button" onClick={close} disabled={busy}>Cancel</button><button type="submit" className="qty-primary" disabled={busy}>{busy?'Saving…':'Save details'}</button>
+    {error && <p className="qty-status bad" role="alert">{error}</p>}
+  </form>;
 }

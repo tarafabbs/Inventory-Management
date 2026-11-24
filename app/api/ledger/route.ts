@@ -1,6 +1,6 @@
 import { db } from '@/lib/database';
-import { createClient } from '@/lib/supabase/server';
-import { permitted, quantities, uniqueLines, scanError, roles, artisanWorkTypes, isOfficeRole, canManageUser, canReverseTransaction, canUndoMovement } from '../../../lib/rules';
+import { inventorySession } from '@/lib/inventory-identity';
+import { permitted, quantities, uniqueLines, scanError, roles, artisanWorkTypes, isOfficeRole, canManageUser, canReverseTransaction, canUndoMovement, isOwner, roleLabel } from '../../../lib/rules';
 import {workshopOperation} from '../../../lib/workshop';
 import {intakeOperation} from '../../../lib/intake-server';
 import {postFinishOperation} from '../../../lib/post-finish';
@@ -13,20 +13,27 @@ const fail=(message:string,status=400)=>Object.assign(new Error(message),{status
 const json=(v:any,status=200)=>Response.json(v,{status,headers:{'Cache-Control':'no-store'}});
 const databaseUnavailable=(message:string)=>/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|connection timeout|password authentication failed|server closed the connection/i.test(message);
 const unavailable=(e:any)=>{console.error('Inventory database unavailable',e?.code||e?.name||'database_error');return json({error:'The inventory database is temporarily unavailable. Try again shortly.'},503);};
-const adminDataTables=new Set(['companies','products','artisans','thanwalas','ground_staff','users','lots','generated_labels','pieces','transactions','transaction_items','piece_events','exceptions','stock_checks','observations','barcode_recoveries']);
+const adminDataTables=new Set(['companies','products','artisans','thanwalas','ground_staff','users','lots','generated_labels','pieces','transactions','transaction_items','piece_events','exceptions','stock_checks','observations','barcode_recoveries','quantity_movements']);
 const retiredWorkshopWrites = new Set([
  'prepareReceipt','updatePreparedReceipt','receipt','draft','label','intake','handoff','return',
  'saveScanDraft','discardScanDraft','artistTransfer','groundSend','groundDispute','stockDispute',
  'finishReceive','reprintOut','reprintReceive','dispute','supplierReturn','jobworkDispatch','jobworkReturn',
  'officeSend','assignThanwala','adjust','reverse',
+ 'officeNewEntry','officeLabel','officeReceive','officeSell','officeReturn','customerReturn','factoryReceive',
+ 'recoveryCreate','undoRecentScan',
 ]);
 function database(){return db;}
-async function identity(){const supabase=await createClient();const {data:{user:signedIn}}=await supabase.auth.getUser();if(!signedIn?.email)throw fail('Sign in to continue.',401);const name=signedIn.user_metadata.full_name||signedIn.user_metadata.name||signedIn.email;let user:any=await db.prepare('SELECT * FROM users WHERE id=? OR email=?').bind(signedIn.id,signedIn.email.toLowerCase()).first();if(!user){await db.prepare('INSERT INTO users(id,email,name,role,active,created_at) SELECT ?,?,?,?,1,? WHERE NOT EXISTS(SELECT 1 FROM users)').bind(signedIn.id,signedIn.email.toLowerCase(),name,'Admin',now()).run();user=await db.prepare('SELECT * FROM users WHERE id=? OR email=?').bind(signedIn.id,signedIn.email.toLowerCase()).first();}if(!user||!user.active)throw fail('Your account has no active staff access. Ask your administrator to add your Google email.',403);return user;}
+async function identity() {
+ const {signedIn,staff}=await inventorySession();
+ if(!signedIn)throw fail('Sign in with Google to continue.',401);
+ if(!staff)throw fail('This Google email has no active staff access.',403);
+ return staff;
+}
 async function all(sql:string,...args:any[]){return (await database().prepare(sql).bind(...args).all()).results;}
 async function workspaceSnapshot(user:any){
  const officeOnly=isOfficeRole(user.role),empty="'[]'::jsonb";
  const officePiece="(p.journey='OFFICE' OR p.holder IN ('OFFICE_PENDING','OFFICE_STOCK','SOLD','FACTORY_RETURN_PENDING'))";
- const users=user.role==='Admin'?"COALESCE((SELECT jsonb_agg(to_jsonb(u) ORDER BY u.name) FROM users u),'[]'::jsonb)":user.role==='Office Manager'?"COALESCE((SELECT jsonb_agg(to_jsonb(u) ORDER BY u.name) FROM users u WHERE u.role IN ('Office Staff','Assistant Manager')),'[]'::jsonb)":empty;
+ const users=isOwner(user.role)?"COALESCE((SELECT jsonb_agg(to_jsonb(u) ORDER BY u.name) FROM users u),'[]'::jsonb)":empty;
  const companies=officeOnly?`COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.name) FROM companies c WHERE c.office_only=1 OR EXISTS(SELECT 1 FROM pieces p WHERE p.company_id=c.id AND ${officePiece})),'[]'::jsonb)`:"COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.name) FROM companies c),'[]'::jsonb)";
  const products=officeOnly?`COALESCE((SELECT jsonb_agg(to_jsonb(pr) ORDER BY pr.name) FROM products pr WHERE pr.office_only=1 OR EXISTS(SELECT 1 FROM pieces p WHERE p.product_id=pr.id AND ${officePiece})),'[]'::jsonb)`:"COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.name) FROM products p),'[]'::jsonb)";
  const artisans=officeOnly?empty:"COALESCE((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.name) FROM artisans a),'[]'::jsonb)";
@@ -53,14 +60,32 @@ async function workspaceSnapshot(user:any){
 }
 export async function GET(req:Request){try{
  const user=await identity(),url=new URL(req.url);
+ if(url.searchParams.has('staff')){
+  if(!isOwner(user.role))throw fail('Only the Owner can manage staff access.',403);
+  const [staff,audit]=await Promise.all([
+   all('SELECT id,name,email,role,active FROM users ORDER BY name,email'),
+   all("SELECT id,actor,actor_role,action,target_label,before_data,after_data,created_at FROM inventory.change_audit WHERE action IN ('staff_added','staff_updated') ORDER BY created_at DESC,id DESC LIMIT 50"),
+  ]);
+  return json({staff,audit});
+ }
+ if(url.searchParams.has('officeCatalog')){
+  if(!permitted(user.role,'officeMaster'))throw fail('Your account cannot manage Office records.',403);
+  const [vendors,products,audit]=await Promise.all([
+   all('SELECT id,name,contact FROM companies WHERE office_only=1 ORDER BY name,id'),
+   all('SELECT id,name,material,weave,color,design FROM products WHERE office_only=1 ORDER BY name,id'),
+   all("SELECT id,actor,actor_role,target_label,created_at FROM inventory.change_audit WHERE action IN ('officeMasterCreate','officeMasterEdit') ORDER BY created_at DESC,id DESC LIMIT 30"),
+  ]);
+  return json({vendors,products,audit});
+ }
  if(url.searchParams.has('adminData')){
-  if(user.role!=='Admin')throw fail('Only Admin can open Data Control.',403);
-  const table=String(url.searchParams.get('table')||'pieces');if(!adminDataTables.has(table))throw fail('Unknown data table.');
+  if(!permitted(user.role,'manageData'))throw fail('You do not have Data Control access.',403);
+  const table=String(url.searchParams.get('table')||'quantity_movements');if(!adminDataTables.has(table))throw fail('Unknown data table.');
+  if(table==='users'&&!isOwner(user.role))throw fail('Only the Owner can open staff records.',403);
   const requestedPage=Number(url.searchParams.get('page')||0),page=Number.isFinite(requestedPage)?Math.max(0,Math.floor(requestedPage)):0,limit=50,offset=page*limit,q=String(url.searchParams.get('q')||'').trim().slice(0,100),pattern=`%${q}%`;
   await database().prepare('SELECT inventory.admin_purge_expired_recoveries()').run();
   const count:any=await database().prepare(`SELECT COUNT(*)::int AS n FROM ${table} t WHERE (?='' OR to_jsonb(t)::text ILIKE ?)`).bind(q,pattern).first();
   const rows=await all(`SELECT to_jsonb(t) AS data FROM ${table} t WHERE (?='' OR to_jsonb(t)::text ILIKE ?) ORDER BY id LIMIT ? OFFSET ?`,q,pattern,limit,offset);
-  const recoveries=await all("SELECT id,action,target_table,target_id,description,record_count,actor,created_at,expires_at,undone_at,undone_by,purged_at,(snapshot IS NOT NULL) AS can_undo FROM admin_recovery_batches ORDER BY created_at DESC LIMIT 100");
+  const recoveries=await all("SELECT id,action,target_table,target_id,description,record_count,actor,created_at,expires_at,undone_at,undone_by,purged_at,(snapshot IS NOT NULL) AS can_undo FROM admin_recovery_batches WHERE (?::boolean OR (action='EDIT_RECORD' AND actor_id=? AND target_table<>'users')) ORDER BY created_at DESC LIMIT 100",isOwner(user.role),user.id);
   return json({table,records:rows.map((row:any)=>row.data),total:count?.n||0,page,limit,recoveries});
  }
  if(url.searchParams.has('recovery')){if(!permitted(user.role,'recovery'))throw fail('Your role does not permit code recovery.',403);return json(await recoveryRead(db,user,url.searchParams));}
@@ -81,17 +106,18 @@ export async function GET(req:Request){try{
  return json(await workspaceSnapshot(user));
 }catch(e:any){const raw=e.message||'Request failed.';if(databaseUnavailable(raw))return unavailable(e);return json({error:raw},e.status||500);}}
 export async function POST(req:Request){let user:any,b:any;try{const origin=req.headers.get('origin');if(origin&&origin!==new URL(req.url).origin)throw fail('Cross-origin writes are not allowed.',403);user=await identity();b=await req.json();const db=database(),op=b.op,v=b.data||{},key=b.key;if(!key||typeof key!=='string'||key.length>100)throw fail('A valid idempotency key is required.');const existing:any=await db.prepare('SELECT * FROM requests WHERE id=?').bind(key).first();if(existing){if(existing.actor!==user.id||existing.operation!==op)throw fail('This request key belongs to another operation.',409);return json(JSON.parse(existing.result));}
-if(retiredWorkshopWrites.has(op)||(op==='recoveryCreate'&&!isOfficeRole(user.role))){
- throw fail('Workshop entries now use quantities. Open the Company Dashboard for this movement.',409);
+if(retiredWorkshopWrites.has(op)){
+ throw fail('Inventory movements now use quantities. Open your stock workspace and choose the corresponding action.',409);
 }
-const privilege=['saveScanDraft','discardScanDraft'].includes(op)?(v.type==='handoff'?'handoff':v.type==='return'?'return':'invalid'):({adminDataEdit:'adminData',adminDataDelete:'adminData',adminDataDeleteAll:'adminData',adminDataUndo:'adminData',undoRecentScan:'undoScan',assignThanwala:'backfillThanwala',officeEntryEdit:'officeEdit',officeMasterEdit:'officeMaster',recoveryReport:'recovery',recoveryCreate:isOfficeRole(user.role)?'officeEntry':'recovery',recoveryStart:'recovery',recoveryConfirm:'recovery',recoveryCancel:'recovery',officeNewEntry:'officeEntry',officeLabel:'officeLabel',groundStaff:'master',jobworkDispatch:'postFinish',jobworkReturn:'postFinish',officeSend:'postFinish',officeReceive:'officeReceive',officeSell:'officeSell',officeReturn:'officeReturn',customerReturn:'officeReturn',factoryReceive:'postFinish',artistTransfer:'handoff',groundSend:'groundSend',groundDispute:'dispute',finishReceive:'finishReceive',reprintOut:'reprintOut',reprintReceive:'reprintReceive',stockDispute:'dispute',prepareReceipt:'receipt',updatePreparedReceipt:'receipt',intake:'label',supplierReturn:'supplierReturn',dispute:'dispute',master:v.id?'master':'masterCreate',user:'user',settings:'settings',receipt:'receipt',draft:'draft',label:'label',handoff:'handoff',return:'return',check:'check',observe:'check',closeCheck:'check',adjust:'adjust',reverse:'undoScan',exception:'exceptionReport',resolve:'exception'} as any)[op];if(!privilege||!permitted(user.role,privilege))throw fail('Your role does not permit this action.',403);
+const privilege=['saveScanDraft','discardScanDraft'].includes(op)?(v.type==='handoff'?'handoff':v.type==='return'?'return':'invalid'):({adminDataEdit:'manageData',adminDataDelete:'adminData',adminDataDeleteAll:'adminData',adminDataUndo:'manageData',undoRecentScan:'undoScan',assignThanwala:'backfillThanwala',officeEntryEdit:'officeEdit',officeMasterEdit:'officeMaster',officeMasterCreate:'officeMaster',recoveryReport:'recovery',recoveryCreate:isOfficeRole(user.role)?'officeEntry':'recovery',recoveryStart:'recovery',recoveryConfirm:'recovery',recoveryCancel:'recovery',officeNewEntry:'officeEntry',officeLabel:'officeLabel',groundStaff:'master',jobworkDispatch:'postFinish',jobworkReturn:'postFinish',officeSend:'postFinish',officeReceive:'officeReceive',officeSell:'officeSell',officeReturn:'officeReturn',customerReturn:'officeReturn',factoryReceive:'postFinish',artistTransfer:'handoff',groundSend:'groundSend',groundDispute:'dispute',finishReceive:'finishReceive',reprintOut:'reprintOut',reprintReceive:'reprintReceive',stockDispute:'dispute',prepareReceipt:'receipt',updatePreparedReceipt:'receipt',intake:'label',supplierReturn:'supplierReturn',dispute:'dispute',master:v.id?'master':'masterCreate',user:'user',settings:'settings',receipt:'receipt',draft:'draft',label:'label',handoff:'handoff',return:'return',check:'check',observe:'check',closeCheck:'check',adjust:'adjust',reverse:'undoScan',exception:'exceptionReport',resolve:'exception'} as any)[op];if(!privilege||!permitted(user.role,privilege))throw fail('Your role does not permit this action.',403);
 const statements:any[]=[],time=now(),actor=user.name;let result:any={ok:true};const add=(sql:string,...args:any[])=>statements.push(db.prepare(sql).bind(...args));const guard=(sql:string,...args:any[])=>{const id=uuid();add(`INSERT INTO guards(id,ok) VALUES(?,CASE WHEN (${sql}) THEN 1 ELSE 0 END)`,id,...args);add('DELETE FROM guards WHERE id=?',id);};
 const event=(p:any,type:string,before:any,after:any,reason:string,tx:string|null=null)=>add('INSERT INTO piece_events(id,piece_id,type,transaction_id,actor,created_at,reason,before_state,after_state) VALUES(?,?,?,?,?,?,?,?,?)',uuid(),p.id,type,tx,actor,time,reason,before?JSON.stringify(before):null,JSON.stringify(after));
 const move=(p:any,type:string,after:any,reason:string,tx:string)=>{guard('SELECT COUNT(*)=1 FROM pieces WHERE id=? AND version=?',p.id,p.version);add('UPDATE pieces SET holder=?,artisan_id=?,ground_staff_id=?,condition=?,label_confirmed_at=?,version=version+1 WHERE id=?',after.holder,after.artisan_id||null,after.holder==='GROUND_STAFF'?after.ground_staff_id:null,after.condition,Object.prototype.hasOwnProperty.call(after,'label_confirmed_at')?after.label_confirmed_at:p.label_confirmed_at,p.id);event(p,type,p,{...after,version:p.version+1},reason,tx);add('INSERT INTO transaction_items(id,transaction_id,piece_id,before_state,after_state) VALUES(?,?,?,?,?)',uuid(),tx,p.id,JSON.stringify(p),JSON.stringify({...p,...after,version:p.version+1}));};
 const transaction=(type:string,artisan:string|null,reason:string,lines:any[],original:string|null=null)=>{const id=v.draft_id||uuid(),number=`${({HANDOFF:'H',RETURN:'R',ADJUSTMENT:'A',REVERSAL:'V',INTAKE:'I',SUPPLIER_RETURN:'S',DISPUTE:'D',ARTIST_TRANSFER:'T',GROUND_ISSUE:'G',GROUND_DISPUTE:'GD',STOCK_DISPUTE:'SD',REPRINT_OUT:'RO',REPRINT_RECEIVE:'RI',FINISH_RECEIVE:'F',JOBWORK_DISPATCH:'JC',JOBWORK_DISPUTE_RETURN:'JR',OFFICE_ENTRY_EDIT:'OE',OFFICE_MASTER_EDIT:'OM',PURCHASE_SOURCE_ASSIGNED:'PS',OFFICE_VENDOR_INTAKE:'ON',OFFICE_LABEL_CONFIRM:'OL',OFFICE_SEND:'OS',OFFICE_RECEIVE:'OR',OFFICE_SALE:'SL',OFFICE_DISPUTE_RETURN:'OD',CUSTOMER_DISPUTE_RETURN:'CR',FACTORY_DISPUTE_RECEIVE:'FR'} as any)[type]}-${time.slice(2,10).replaceAll('-','')}-${id.slice(0,6).toUpperCase()}`;if(v.draft_id){guard("SELECT COUNT(*)=1 FROM transactions WHERE id=? AND status='DRAFT' AND created_by=? AND type=?",id,user.id,type);add("UPDATE transactions SET number=?,artisan_id=?,status='CONFIRMED',reason=?,actor=?,created_at=?,snapshot=? WHERE id=?",number,artisan,reason,actor,time,JSON.stringify(lines),id);}else add('INSERT INTO transactions(id,number,type,artisan_id,status,reason,actor,created_at,original_id,snapshot,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)',id,number,type,artisan,'CONFIRMED',reason,actor,time,original,JSON.stringify(lines),user.id);result={ok:true,id,number};return id;};
 let adminDataResult:any=null;
 if(['adminDataEdit','adminDataDelete','adminDataDeleteAll','adminDataUndo'].includes(op)){
- if(user.role!=='Admin')throw fail('Only Admin can use Data Control.',403);
+ if(['adminDataDelete','adminDataDeleteAll'].includes(op)&&!isOwner(user.role))throw fail('Only the Owner can delete data.',403);
+ if(op==='adminDataEdit'&&v.table==='users')throw fail('Update staff in Access Management.',403);
  const batchId=uuid();
  if(op==='adminDataEdit'){
   if(!adminDataTables.has(v.table)||!v.id||!v.patch||typeof v.patch!=='object'||Array.isArray(v.patch))throw fail('Choose a valid record and JSON changes.');
@@ -160,6 +186,50 @@ else if(op==='undoRecentScan'){
 }
 else if(op==='reverse'){if(!v.reason?.trim())throw fail('A reversal reason is required.');const tx:any=await db.prepare('SELECT * FROM transactions WHERE id=?').bind(v.id).first();if(!tx||tx.status!=='CONFIRMED'||!['HANDOFF','RETURN'].includes(tx.type))throw fail('Only a confirmed handoff or return can be reversed.');if(!canReverseTransaction(user,tx,Date.parse(time)))throw fail('You may reverse your own eligible artist transaction within 20 minutes. Supervisor can review older workshop corrections.',403);const lines=await all('SELECT * FROM transaction_items WHERE transaction_id=?',tx.id);const pcs:any[]=[];for(const line of lines as any[]){const p:any=await db.prepare('SELECT * FROM pieces WHERE id=?').bind(line.piece_id).first(),after=JSON.parse(line.after_state);if(p.version!==after.version)throw fail(`${p.code} has subsequent changes. Use a documented adjustment instead.`,409);pcs.push({p,before:JSON.parse(line.before_state)});}guard("SELECT COUNT(*)=1 FROM transactions WHERE id=? AND status='CONFIRMED'",tx.id);const id=transaction('REVERSAL',tx.artisan_id,v.reason,pcs.map(x=>x.p),tx.id);for(const {p,before} of pcs)move(p,'REVERSAL',before,v.reason,id);add("UPDATE transactions SET status='VOIDED_BY_REVERSAL' WHERE id=?",tx.id);add("UPDATE exceptions SET status='RESOLVED',resolution=? WHERE status='OPEN' AND detail LIKE ?",`${actor} · ${time} · Artist transaction reversed: ${v.reason}`,`%${tx.id}%`);}
 else if(op==='settings'){const tz=v.timezone||'Asia/Kolkata';try{new Intl.DateTimeFormat('en',{timeZone:tz}).format()}catch{throw fail('Invalid IANA timezone.');}if(!Number.isFinite(+v.label_width)||+v.label_width<30||+v.label_width>100||!Number.isFinite(+v.label_height)||+v.label_height<20||+v.label_height>80)throw fail('Label size must be 30–100 mm wide and 20–80 mm high.');for(const [k,value] of Object.entries({timezone:tz,label_width:v.label_width,label_height:v.label_height,business_name:v.business_name||'IMS TARA MAA'}))add('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',k,String(value));}
-else if(op==='user'){if(!roles.includes(v.role)||!/^\S+@\S+\.\S+$/.test(v.email||''))throw fail('Enter a valid email and role.');const target:any=v.id?await db.prepare('SELECT * FROM users WHERE id=?').bind(v.id).first():null;if(v.id&&!target)throw fail('Staff account not found.',404);if(!canManageUser(user.role,target?.role||null,v.role))throw fail('Office Manager can only create or manage Office Staff and Assistant Manager access.',403);if(v.id===user.id&&(v.role!=='Admin'||!v.active))throw fail('You cannot deactivate or demote your current admin account.');if(v.id)add('UPDATE users SET name=?,role=?,active=? WHERE id=?',v.name||v.email,v.role,v.active?1:0,v.id);else add('INSERT INTO users(id,email,name,role,active,created_at) VALUES(?,?,?,?,1,?)',uuid(),v.email.toLowerCase().trim(),v.name||v.email,v.role,time);}
+else if(op==='user'){
+ const email=typeof v.email==='string'?v.email.trim().toLowerCase():'';
+ const name=typeof v.name==='string'?v.name.trim():'';
+ if(!roles.includes(v.role)||!/^\S+@\S+\.\S+$/.test(email)||email.length>254||!name||name.length>120){
+  throw fail('Enter a staff name, approved Google email and role.');
+ }
+ const target:any=v.id?await db.prepare('SELECT id,name,email,role,active FROM users WHERE id=?').bind(v.id).first():null;
+ if(v.id&&!target)throw fail('Staff account not found.',404);
+ if(!canManageUser(user.role,target?.role||null,v.role))throw fail('Only the Owner can manage staff access.',403);
+ if(target&&email!==target.email.toLowerCase())throw fail('To change sign-in email, add the new address and deactivate the old one.');
+ const active=v.active===false?0:1;
+ if(target?.id===user.id&&(v.role!=='Admin'||!active))throw fail('You cannot deactivate or demote your own Owner account.');
+ const id=target?.id||uuid();
+ add('LOCK TABLE inventory.users IN SHARE ROW EXCLUSIVE MODE');
+ guard("SELECT COUNT(*)=1 FROM users WHERE id=? AND role='Admin' AND active=1",user.id);
+ if(target){
+  guard('SELECT COUNT(*)=1 FROM users WHERE id=? AND name=? AND role=? AND active=?',id,target.name,target.role,target.active);
+  add('UPDATE users SET name=?,role=?,active=? WHERE id=?',name,v.role,active,id);
+ }else{
+  add('INSERT INTO users(id,email,name,role,active,created_at) VALUES(?,?,?,?,?,?)',id,email,name,v.role,active,time);
+ }
+ add('INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label,before_data,after_data) VALUES(?,?,?,?,?,?::jsonb,?::jsonb)',
+  user.id,user.name,roleLabel(user.role),target?'staff_updated':'staff_added',email,target?JSON.stringify(target):null,
+  JSON.stringify({id,name,email,role:v.role,active}));
+ result={ok:true,id};
+}
+else if(op==='officeMasterCreate'){
+ const name=typeof v.name==='string'?v.name.trim():'';
+ if(!name||name.length>120||!['companies','products'].includes(v.kind))throw fail('Enter a valid outside vendor or product category.');
+ const id=uuid();
+ if(v.kind==='companies'){
+  const existing=await db.prepare('SELECT id FROM companies WHERE lower(name)=?').bind(name.toLowerCase()).first();
+  if(existing)throw fail('This vendor name already exists.',409);
+  add("INSERT INTO companies(id,name,prefix,ownership,office_only) VALUES(?,?,?,'EXTERNAL',1)",id,name,id.replaceAll('-','').slice(0,6).toUpperCase());
+ }else{
+  const existing=await db.prepare('SELECT id FROM products WHERE office_only=1 AND lower(name)=?').bind(name.toLowerCase()).first();
+  if(existing)throw fail('This office category already exists.',409);
+  add('INSERT INTO products(id,name,office_only) VALUES(?,?,1)',id,name);
+ }
+ result={ok:true,id};
+}
+if(['master','officeMasterCreate','officeMasterEdit','settings'].includes(op)){
+ add('INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label) VALUES(?,?,?,?,?)',
+  user.id,user.name,roleLabel(user.role),op,String(v.name||v.business_name||v.kind||op).slice(0,200));
+}
 add('INSERT INTO requests(id,actor,operation,result) VALUES(?,?,?,?)',key,user.id,op,JSON.stringify(result));await db.batch(statements);return json(result);
 }catch(e:any){const raw=e.message||'Request failed.';if(databaseUnavailable(raw))return unavailable(e);if(user&&b?.key){const old:any=await database().prepare('SELECT * FROM requests WHERE id=? AND actor=? AND operation=?').bind(b.key,user.id,b.op).first();if(old)return json(JSON.parse(old.result));}const message=/barcode_recoveries_one_pending_code/i.test(raw)?'A replacement is already awaiting attachment for this code. Open it from Pending recoveries.':/still referenced|foreign key constraint/i.test(raw)?'This record is still used by related data. Delete the dependent records first, or use the full inventory reset.':/companies_prefix|companies_prefix_unique|companies\.prefix/i.test(raw)?'An internal company identity collision occurred. Please try again.':/users_role_check/i.test(raw)?'This staff role is not enabled in the database. Refresh and try again after the latest update.':/stale state guards|requests_pkey/i.test(raw)?'A record changed during confirmation. No changes were saved. Refresh and review the entire batch.':/check constraint/i.test(raw)?'One or more submitted values are not allowed. Review the form and try again.':/unique constraint|duplicate key/i.test(raw)?'This record already exists. Check for a duplicate name, email, or code.':raw;return json({error:message},e.status||(/constraint|duplicate key/i.test(raw)?409:400));}}

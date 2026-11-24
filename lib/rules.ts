@@ -1,18 +1,22 @@
-export const roles = ['Viewer','Receiving','Issue','Inspection','Office Staff','Assistant Manager','Supervisor','Office Manager','Admin'];
+export const roles = ['Viewer','Receiving','Issue','Inspection','Office Staff','Assistant Manager','Supervisor','Office Manager','Management','Admin'];
 export const officeRoles = ['Office Staff','Assistant Manager','Office Manager'];
 export const workshopStaffRoles = ['Receiving','Issue','Inspection','Supervisor'];
 export const officeAssignableRoles = ['Office Staff','Assistant Manager'];
 export const isOfficeRole = (role:string) => officeRoles.includes(role);
 export const isWorkshopStaffRole = (role:string) => workshopStaffRoles.includes(role);
+// Admin is the stored role for existing Owner accounts.
+export const isOwner = (role:string) => role === 'Admin';
+export const isManagement = (role:string) => isOwner(role) || role === 'Management';
+export const roleLabel = (role:string) => isOwner(role) ? 'Owner' : role;
 const withinWindow=(createdAt:string,at:number,milliseconds:number)=>{const created=Date.parse(createdAt),age=at-created;return Number.isFinite(created)&&Number.isFinite(at)&&age>=0&&age<=milliseconds;};
-export function canEditPreparedReceipt(role:string,createdAt:string,at=Date.now()){if(role==='Admin')return true;return isWorkshopStaffRole(role)&&withinWindow(createdAt,at,24*60*60*1000);}
-export function canEditOfficeEntry(role:string,createdAt:string,at=Date.now()){if(role==='Admin')return true;return ['Office Manager','Assistant Manager'].includes(role)&&withinWindow(createdAt,at,24*60*60*1000);}
-export const canManageUser = (actorRole:string,targetRole:string|null,nextRole:string) => actorRole==='Admin' ? roles.includes(nextRole) : actorRole==='Office Manager' && (!targetRole||officeAssignableRoles.includes(targetRole)) && officeAssignableRoles.includes(nextRole);
+export function canEditPreparedReceipt(role:string,createdAt:string,at=Date.now()){if(isManagement(role))return true;return isWorkshopStaffRole(role)&&withinWindow(createdAt,at,24*60*60*1000);}
+export function canEditOfficeEntry(role:string,createdAt:string,at=Date.now()){if(isManagement(role))return true;return ['Office Manager','Assistant Manager'].includes(role)&&withinWindow(createdAt,at,24*60*60*1000);}
+export const canManageUser = (actorRole:string,_targetRole:string|null,nextRole:string) => isOwner(actorRole) && roles.includes(nextRole);
 export const artisanWorkTypes=['Free Hand Paint','Kalamkari','Batik Paint','Eco Print','Momchitra','Alcohol Paint','Block Print','Screen Print','Block Batik Print','Mix Dye','Sibori Dye','Pigment Block','Cotton Batik','Others'];
 export const privileges=[
  'read','receipt','label','print','draft','masterCreate','master','recovery','undoScan','exceptionReport','check',
  'handoff','return','dispute','supplierReturn','groundSend','finishReceive','reprintOut','reprintReceive','postFinish',
- 'exception','reverse','adjust','reprint','backfillThanwala','officeEntry','officeLabel','officeReceive','officeSell','officeReturn','officeEdit','officeMaster','user','settings','adminData'
+ 'exception','reverse','adjust','reprint','backfillThanwala','officeEntry','officeLabel','officeReceive','officeSell','officeReturn','officeEdit','officeMaster','user','settings','adminData','manageData'
 ];
 const workshopShared=['read','receipt','label','print','masterCreate','recovery','undoScan','exceptionReport','check','backfillThanwala'];
 const officeShared=['read','officeLabel','officeReceive','officeSell','officeReturn','recovery','undoScan'];
@@ -24,7 +28,8 @@ const rolePrivileges:Record<string,ReadonlySet<string>>={
  Supervisor:new Set([...workshopShared,'draft','master','handoff','return','dispute','supplierReturn','groundSend','finishReceive','reprintOut','reprintReceive','postFinish','exception','reverse','adjust','reprint','backfillThanwala']),
  'Office Staff':new Set(officeShared),
  'Assistant Manager':new Set([...officeShared,'officeEntry','officeEdit','officeMaster']),
- 'Office Manager':new Set([...officeShared,'officeEntry','officeEdit','officeMaster','user']),
+ 'Office Manager':new Set([...officeShared,'officeEntry','officeEdit','officeMaster']),
+ Management:new Set(privileges.filter(privilege => !['user','adminData'].includes(privilege))),
  Admin:new Set(privileges)
 };
 export function permitted(role:string,op:string){return Object.prototype.hasOwnProperty.call(rolePrivileges,role)&&rolePrivileges[role].has(op);}
@@ -39,7 +44,7 @@ function ownsRecord(user:AccessUser,record:any,event?:any){
 }
 export function canReverseTransaction(user:AccessUser,tx:any,at=Date.now()){
  if(!user||!tx||tx.status!=='CONFIRMED'||!['HANDOFF','RETURN'].includes(tx.type))return false;
- if(['Admin','Supervisor'].includes(user.role))return true;
+ if(isManagement(user.role)||user.role==='Supervisor')return true;
  const privilege=tx.type==='HANDOFF'?'handoff':'return';
  return isWorkshopStaffRole(user.role)&&permitted(user.role,privilege)&&ownsRecord(user,tx)&&withinWindow(tx.created_at,at,correctionWindow);
 }
@@ -55,7 +60,7 @@ export function canUndoMovement(user:AccessUser,piece:any,event:any,tx:any=null,
  const before=stateObject(event.before_state),after=stateObject(event.after_state),type=tx?.type||event.type;
  if(!after||(!before&&type!=='INTAKE')||!Number.isInteger(piece.version)||piece.version!==after.version||piece.holder!==after.holder)return false;
  if(after.journey&&piece.journey!==after.journey)return false;
- const admin=user.role==='Admin',supervisor=user.role==='Supervisor',officeManager=['Office Manager','Assistant Manager'].includes(user.role);
+ const admin=isManagement(user.role),supervisor=user.role==='Supervisor',officeManager=['Office Manager','Assistant Manager'].includes(user.role);
  if(officeCorrections[type]){
   if(!admin&&!isOfficeRole(user.role))return false;
   if(!admin&&!officeManager&&!ownsRecord(user,tx,event))return false;
