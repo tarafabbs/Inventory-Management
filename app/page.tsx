@@ -1,3 +1,4 @@
+import {InventoryText} from './inventory-language';
 import { redirect } from "next/navigation";
 import {productionSnapshot} from '@/lib/production-snapshot';
 import type {Snapshot} from '@/lib/production-types';
@@ -12,8 +13,8 @@ export default async function Page({searchParams}: {searchParams: Promise<{view?
   const {signedIn,staff} = await inventorySession();
   if (!signedIn) redirect("/sign-in");
   if (!staff) return <main className="loading-page">
-    <h1>Staff access required</h1>
-    <p>Sign in with the Google email approved by your Owner.</p>
+    <h1><InventoryText value="Staff access required"/></h1>
+    <p><InventoryText value="Sign in with the Google email approved by your Owner."/></p>
     <SignOutButton/>
   </main>;
 

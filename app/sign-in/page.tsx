@@ -1,3 +1,4 @@
+import {InventoryText} from '../inventory-language';
 import { redirect } from "next/navigation";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
@@ -19,7 +20,7 @@ export default async function SignInPage() {
         height={254}
         priority
       />
-      <p>Sign in to open your private inventory workspace.</p>
+      <p><InventoryText value="Sign in to open your private inventory workspace."/></p>
       <SignInButton />
     </main>
   );

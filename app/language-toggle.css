@@ -7,3 +7,17 @@ body[data-language=bn]{font-family:'Noto Sans Bengali','Hind Siliguri','Kohinoor
 body[data-language=bn] h1,body[data-language=bn] h2,body[data-language=bn] h3{font-family:'Noto Sans Bengali','Hind Siliguri','Kohinoor Bangla','Bangla Sangam MN','Manrope',sans-serif;letter-spacing:0}
 body[data-language=bn] .nav-label,body[data-language=bn] .eyebrow{letter-spacing:.5px}
 @media(max-width:760px){.language-toggle{padding:2px}.language-toggle>svg{display:none}.language-toggle button{padding:4px 6px;font-size:8px}.mobile-staff-restricted .topbar{gap:8px}.mobile-staff-restricted .language-toggle-host{margin-left:auto}}
+/* The active inventory UI uses React context, never the legacy DOM translator. */
+:root{--inventory-language-height:52px}
+.inventory-language-bar{height:var(--inventory-language-height);position:sticky;top:0;z-index:70;display:flex;align-items:center;justify-content:flex-end;gap:14px;padding:5px 22px;background:#fff;border-bottom:1px solid #e5deee;color:#41324f;font:14px/1.4 system-ui,sans-serif}
+.inventory-language-bar>div{display:flex;gap:4px;padding:2px;background:#f1edf8;border-radius:10px}
+.inventory-language-bar button{min-width:82px;min-height:38px;padding:6px 13px;border:0;border-radius:8px;background:transparent;color:#49385b;font:inherit;font-weight:650;cursor:pointer}
+.inventory-language-bar button[aria-pressed=true]{background:#6542a1;color:#fff}
+.inventory-language-bar button:focus-visible{outline:3px solid #b48ae5;outline-offset:2px}
+.prod-header{top:var(--inventory-language-height)}
+.prod-nav{top:calc(76px + var(--inventory-language-height))}
+.prod-loading{min-height:calc(100dvh - var(--inventory-language-height))}
+@media(max-width:760px){.inventory-language-bar{padding:5px 12px;gap:10px;font-size:13px}.inventory-language-bar button{min-width:76px}.prod-nav{top:calc(68px + var(--inventory-language-height))}}
+@media print{.inventory-language-bar{display:none!important}}
+
+.qty-app .qty-header{top:var(--inventory-language-height,52px)}

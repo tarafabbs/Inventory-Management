@@ -1,8 +1,11 @@
 "use client";
+import {useInventoryLanguage} from '@/app/inventory-language';
 
 import { createClient } from "@/lib/supabase/client";
 
 export default function SignInButton() {
+    const {t:tr}=useInventoryLanguage();
+
   async function signIn() {
     const supabase = createClient();
     await supabase.auth.signInWithOAuth({
@@ -16,7 +19,8 @@ export default function SignInButton() {
 
   return (
     <button className="btn primary" onClick={signIn}>
-      Continue with Google
+
+      {tr("Continue with Google")}
     </button>
   );
 }
