@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import QuantityWorkspace from "./quantity-workspace";
+import ProductionWorkspace from "./production-workspace";
 import SignOutButton from "./sign-out-button";
 import {inventorySession} from "@/lib/inventory-identity";
 import {isManagement,isOfficeRole} from "@/lib/rules";
@@ -16,5 +16,5 @@ export default async function Page({searchParams}: {searchParams: Promise<{view?
   </main>;
 
   const office = isOfficeRole(staff.role) || (isManagement(staff.role) && (await searchParams).view === "Office");
-  return <QuantityWorkspace office={office}/>;
+  return <ProductionWorkspace office={office}/>;
 }

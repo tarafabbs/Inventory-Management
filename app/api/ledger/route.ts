@@ -107,6 +107,7 @@ export async function GET(req:Request){try{
  return json(await workspaceSnapshot(user));
 }catch(e:any){const raw=e.message||'Request failed.';if(databaseUnavailable(raw))return unavailable(e);return json({error:raw},e.status||500);}}
 export async function POST(req:Request){let user:any,b:any;try{const origin=req.headers.get('origin');if(origin&&origin!==new URL(req.url).origin)throw fail('Cross-origin writes are not allowed.',403);user=await identity();b=await req.json();const db=database(),op=b.op,v=b.data||{},key=b.key;if(!key||typeof key!=='string'||key.length>100)throw fail('A valid idempotency key is required.');const existing:any=await db.prepare('SELECT * FROM requests WHERE id=?').bind(key).first();if(existing){if(existing.actor!==user.id||existing.operation!==op)throw fail('This request key belongs to another operation.',409);return json(JSON.parse(existing.result));}
+if(['master','artisanCreate','adminDataEdit','adminDataDelete','adminDataDeleteAll','adminDataUndo','officeMasterEdit','officeMasterCreate'].includes(op)&&await db.prepare("SELECT value FROM settings WHERE key='production_v2' AND value='enabled'").first())throw fail('Use the new Stock Management screens; the previous data archive is read-only.',409);
 if(retiredWorkshopWrites.has(op)){
  throw fail('Inventory movements now use quantities. Open your stock workspace and choose the corresponding action.',409);
 }

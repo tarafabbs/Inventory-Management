@@ -316,6 +316,7 @@ export async function POST(request: Request) {
     const origin = request.headers.get('origin');
     if (origin && origin !== new URL(request.url).origin) throw new StockError('Use the inventory site to save your entry.', 403);
     const user = await stockUser();
+    if(await db.prepare("SELECT value FROM settings WHERE key='production_v2' AND value='enabled'").first()) throw new StockError('Use the new Stock Management screens. Previous history is read-only.',409);
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StockError('Enter a valid stock movement.');
     const kind = value(body.kind);

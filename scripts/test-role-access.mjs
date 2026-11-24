@@ -20,7 +20,7 @@ for(const role of roles){
  check(permitted(role,'read'),`${role} can read its scoped workspace`);
  check(!permitted(role,'unknownPrivilege'),`${role} fails closed for unknown privileges`);
  for(const privilege of privileges)if(role==='Viewer')check(privilege==='read'||!permitted(role,privilege),'Viewer has no mutation permissions');
- if(role!=='Admin')for(const privilege of ['adminData','settings'])check(!permitted(role,privilege),`${role} cannot ${privilege}`);
+ if(role!=='Admin')for(const privilege of ['adminData','user'])check(!permitted(role,privilege),`${role} cannot ${privilege}`);
 }
 for(const privilege of privileges)check(!permitted('Unknown role',privilege),'Unknown roles fail closed');
 for(const role of ['constructor','toString','__proto__'])check(!permitted(role,'read'),'Inherited object keys are not roles');
@@ -48,7 +48,9 @@ for(const role of ['Assistant Manager','Office Manager']){
 }
 check(canEditOfficeEntry('Admin',minutesAgo(100000),at)&&canEditPreparedReceipt('Admin',minutesAgo(100000),at),'Admin retains lifetime entry edits');
 check(!canEditOfficeEntry('Office Staff',minutesAgo(1),at)&&!canEditOfficeEntry('Supervisor',minutesAgo(1),at),'Only office managers or Admin edit office entries');
-check(canManageUser('Office Manager',null,'Office Staff')&&canManageUser('Office Manager','Assistant Manager','Office Staff'),'Office Manager keeps subordinate office access control');
+check(!canManageUser('Office Manager',null,'Office Staff')&&!canManageUser('Office Manager','Assistant Manager','Office Staff'),'Only Owner controls staff access');
+check(permitted('Management','settings')&&permitted('Management','manageData')&&!permitted('Management','user')&&!permitted('Management','adminData'),'Management operates the app; Owner alone controls access and deletion');
+check(canManageUser('Admin',null,'Management'),'Owner may assign approved roles');
 check(!canManageUser('Assistant Manager',null,'Office Staff')&&!canManageUser('Office Manager',null,'Supervisor')&&!canManageUser('Office Manager','Admin','Office Staff'),'Office access cannot escalate roles');
 
 check(canReverseTransaction(user('Issue'),tx('HANDOFF'),at),'Issue may reverse its own recent handoff');
