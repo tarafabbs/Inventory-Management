@@ -68,13 +68,14 @@ class PreparedStatement {
   constructor(
     private readonly source: string,
     private readonly args: BoundValue[] = [],
+    private readonly transaction?: Queryable,
   ) {}
 
   bind(...args: BoundValue[]) {
-    return new PreparedStatement(this.source, args);
+    return new PreparedStatement(this.source, args, this.transaction);
   }
 
-  async execute(db: Queryable = connection()) {
+  async execute(db: Queryable = this.transaction ?? connection()) {
     return db.unsafe(postgresSql(this.source), this.args);
   }
 
@@ -100,6 +101,11 @@ export function ledgerDatabase() {
   return {
     prepare(source: string) {
       return new PreparedStatement(source);
+    },
+    transaction<T>(work: (tx: {prepare(source: string): PreparedStatement}) => Promise<T>) {
+      return connection().begin(tx => work({
+        prepare: source => new PreparedStatement(source, [], tx),
+      }));
     },
     async batch(statements: PreparedStatement[]) {
       return connection().begin(async (transaction) => {
