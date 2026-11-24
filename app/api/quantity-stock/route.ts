@@ -34,7 +34,7 @@ async function stockUser() {
 const officeStockStages = "('office_pending','office_vendor_pending','office_stock','office_sold','factory_return_pending')";
 const officeHistoryKinds = '(' + [...officeOperations,'send_office','receive_factory_return'].map(kind => "'" + kind + "'").join(',') + ')';
 const legacyOfficeTransactions = "('OFFICE_SEND','OFFICE_RECEIVE','OFFICE_LABEL_CONFIRM','OFFICE_SALE','OFFICE_DISPUTE_RETURN','CUSTOMER_DISPUTE_RETURN','FACTORY_DISPUTE_RECEIVE','OFFICE_ENTRY_EDIT','OFFICE_MASTER_EDIT')";
-async function snapshot(user: InventoryUser, companyId: string, offset: number, office: boolean): Promise<StockSnapshot> {
+async function snapshot(user: InventoryUser, companyId: string, offset: number, office: boolean, artisanId=''): Promise<StockSnapshot> {
   const movementScope = office ? `m.kind IN ${officeHistoryKinds}` : `(m.kind NOT IN ${officeHistoryKinds} OR m.kind IN ('send_office','receive_factory_return'))`;
   const legacyTxScope = office ? `t.type IN ${legacyOfficeTransactions}`
     : `p.journey='WORKSHOP' AND (t.type NOT IN ${legacyOfficeTransactions} OR t.type IN ('OFFICE_SEND','FACTORY_DISPUTE_RECEIVE')) AND t.type<>'INTAKE'`;
@@ -46,7 +46,7 @@ async function snapshot(user: InventoryUser, companyId: string, offset: number, 
     WITH scoped_balances AS (
       SELECT b.* FROM inventory.quantity_balances b JOIN companies c ON c.id=b.company_id JOIN products p ON p.id=b.product_id
       WHERE b.quantity<>0 AND ${balanceScope}
-    ), history AS (
+    ), all_history AS (
       SELECT m.id::text, m.company_id, m.product_id, m.artisan_id, m.kind,
         m.quantity + coalesce((SELECT sum(e.quantity) FROM inventory.quantity_movements e WHERE e.original_id=m.id),0) AS quantity,
         m.quantity AS original_quantity, m.previous_quantity, m.new_quantity, m.created_at,
@@ -70,11 +70,16 @@ async function snapshot(user: InventoryUser, companyId: string, offset: number, 
           a.actor,a.actor_id,(a.after_data->>'received_on')::date,a.actor_role
         FROM inventory.change_audit a JOIN inventory.quantity_movements m ON m.id::text=a.target_label
         WHERE a.action='office_entry_edit' AND (?::text = '' OR m.company_id=?)` : ''}
+    ), history AS (
+      SELECT * FROM all_history WHERE (?::text='' OR artisan_id=?)
       ORDER BY created_at DESC,id DESC
       LIMIT ? OFFSET ?
     )
     SELECT
-      coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.id,'name',c.name,'active',c.active,'ownership',c.ownership,'office_only',c.office_only) ORDER BY c.name) FROM companies c WHERE ${companyScope}),'[]') AS companies,
+      coalesce((SELECT jsonb_agg(jsonb_build_object(
+        'id',c.id,'name',c.name,'active',c.active,'ownership',c.ownership,'office_only',c.office_only,
+        'contact',c.contact,'address',c.address,'notes',c.notes
+      ) ORDER BY c.name) FROM companies c WHERE ${companyScope}),'[]') AS companies,
       coalesce((SELECT jsonb_agg(jsonb_build_object('id',p.id,'name',p.name,'active',p.active,'office_only',p.office_only) ORDER BY p.name) FROM products p WHERE ${productScope}),'[]') AS products,
       ${office ? "'[]'::jsonb" : "coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'name',name,'active',active) ORDER BY name) FROM artisans),'[]')"} AS artisans,
       ${office ? "'[]'::jsonb" : "coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'name',name,'active',active) ORDER BY name) FROM thanwalas),'[]')"} AS thanwalas,
@@ -82,7 +87,7 @@ async function snapshot(user: InventoryUser, companyId: string, offset: number, 
       ${office ? "'[]'::jsonb" : "coalesce((SELECT jsonb_agg(t) FROM inventory.quantity_totals t),'[]')"} AS totals,
       coalesce((SELECT jsonb_agg(h ORDER BY h.created_at DESC,h.id DESC) FROM history h),'[]') AS history
   `).bind(companyId, companyId, companyId, companyId, companyId, companyId, ...(office ? [companyId,companyId] : []),
-    stockHistoryPageSize + 1, offset)
+    artisanId,artisanId,stockHistoryPageSize + 1, offset)
     .first<Omit<StockSnapshot, 'user' | 'more'>>();
   if (!row) throw new StockError('The stock ledger is unavailable.', 503);
   return {
@@ -99,7 +104,8 @@ export async function GET(request: Request) {
     if (office && !isOfficeRole(user.role) && !isManagement(user.role)) throw new StockError('This account has no Office access.',403);
     const page = Number(params.get('page') || 0);
     if (!Number.isSafeInteger(page) || page < 0 || page > 10_000) throw new StockError('Choose a valid history page.');
-    return respond(await snapshot(user, (params.get('company') || '').slice(0, 100), page * stockHistoryPageSize, office));
+    return respond(await snapshot(user, (params.get('company') || '').slice(0, 100), page * stockHistoryPageSize, office,
+      office?'':(params.get('artisan')||'').slice(0,100)));
   } catch (error) {
     return failed(error);
   }
@@ -267,6 +273,39 @@ async function editOfficeEntry(tx:StockTransaction,user:InventoryUser,body:Recor
   return {ok:true,id};
 }
 
+async function editCompanyProfile(tx:StockTransaction,user:InventoryUser,body:Record<string,unknown>) {
+  if (!isManagement(user.role)) throw new StockError('Only Owner or Management can edit company profiles.',403);
+  const id=value(body.id);
+  const name=value(body.name,120);
+  const contact=value(body.contact,300);
+  const address=value(body.address,1000);
+  const notes=value(body.notes,2000);
+  if (!id || !name) throw new StockError('Enter the company name.');
+  const before=await tx.prepare(`
+    SELECT id,name,contact,address,notes,active,ownership FROM companies
+    WHERE id=? AND office_only=0 FOR UPDATE
+  `).bind(id).first<{id:string;name:string;contact:string;address:string;notes:string;active:number;ownership:string}>();
+  if (!before) throw new StockError('Company profile not found.',404);
+  const expected=body.expected as Record<string,unknown>|undefined;
+  if (!expected || ['name','contact','address','notes'].some(field => before[field as keyof typeof before] !== expected[field])) {
+    throw new StockError('This company profile changed. Reload and try again.',409);
+  }
+  const duplicate=await tx.prepare('SELECT id FROM companies WHERE lower(name)=lower(?) AND id<>? LIMIT 1')
+    .bind(name,id).first();
+  if (duplicate) throw new StockError('Another company already uses this name.',409);
+  const after={name,contact,address,notes};
+  if (Object.entries(after).every(([field,current]) => current === before[field as keyof typeof before])) {
+    throw new StockError('Change at least one company detail before saving.');
+  }
+  await tx.prepare('UPDATE companies SET name=?,contact=?,address=?,notes=? WHERE id=?')
+    .bind(name,contact,address,notes,id).run();
+  await tx.prepare(`
+    INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label,before_data,after_data)
+    VALUES (?,?,?,'company_profile_edit',?,?::jsonb,?::jsonb)
+  `).bind(user.id,user.name,roleLabel(user.role),id,JSON.stringify(before),JSON.stringify({...before,...after})).run();
+  return {ok:true,id};
+}
+
 export async function POST(request: Request) {
   try {
     const origin = request.headers.get('origin');
@@ -277,9 +316,9 @@ export async function POST(request: Request) {
     const kind = value(body.kind);
     const key = value(body.key);
     if (!/^[a-f0-9-]{36}$/i.test(key)) throw new StockError('Reload the form and try again.');
-    if (!['issue_edit','office_entry_edit'].includes(kind) && !Object.hasOwn(stockOperations, kind)) throw new StockError('Choose a stock action.');
+    if (!['issue_edit','office_entry_edit','company_profile_edit'].includes(kind) && !Object.hasOwn(stockOperations, kind)) throw new StockError('Choose a stock action.');
     if (isOfficeRole(user.role) && !isOfficeOperation(kind) && kind!=='office_entry_edit') throw new StockError('This account is limited to Office movements.',403);
-    requirePermission(user, kind==='issue_edit'?'handoff':kind==='office_entry_edit'?'officeEdit':stockOperations[kind as StockOperation].permission);
+    requirePermission(user, kind==='issue_edit'?'handoff':kind==='office_entry_edit'?'officeEdit':kind==='company_profile_edit'?'manageData':stockOperations[kind as StockOperation].permission);
     const result = await db.transaction(async tx => {
       const stillActive=await tx.prepare('SELECT id FROM users WHERE id=? AND role=? AND active=1 FOR SHARE').bind(user.id,user.role).first();
       if (!stillActive) throw new StockError('Your access changed. Reload and sign in again.',403);
@@ -292,7 +331,8 @@ export async function POST(request: Request) {
         return JSON.parse(existing.result);
       }
       const saved = kind==='issue_edit' ? await editIssue(tx,user,body) : kind==='office_entry_edit'
-        ? await editOfficeEntry(tx,user,body) : await writeMovement(tx,user,body,kind as StockOperation);
+        ? await editOfficeEntry(tx,user,body) : kind==='company_profile_edit'
+          ? await editCompanyProfile(tx,user,body) : await writeMovement(tx,user,body,kind as StockOperation);
       await tx.prepare('INSERT INTO requests(id,actor,operation,result) VALUES (?,?,?,?)')
         .bind(requestKey, user.id, kind, JSON.stringify(saved)).run();
       return saved;

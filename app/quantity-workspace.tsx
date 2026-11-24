@@ -1,7 +1,7 @@
 'use client';
 
 import {useCallback, useEffect, useRef, useState, type FormEvent} from 'react';
-import {ArrowDownLeft, ArrowUpRight, ClipboardList, Database, LayoutDashboard, Menu, Package, Plus, ShieldCheck, Store, Wrench, X} from 'lucide-react';
+import {ArrowDownLeft, ArrowUpRight, Building2, ChevronLeft, ClipboardList, Database, LayoutDashboard, MapPin, Menu, Package, Pencil, Phone, Plus, ShieldCheck, Store, Wrench, X} from 'lucide-react';
 import {artisanWorkTypes, canEditOfficeEntry, isManagement, isOwner, permitted, roleLabel} from '@/lib/rules';
 import {
   issueEditWindow, maxStockQuantity, needsDisputeReason, officeOperations, ownsOfficeTransfer,
@@ -21,6 +21,7 @@ const navigation = [
   ['receive', 'Receive from Artisan', ArrowDownLeft],
   ['manage', 'Repair & Delivery', Wrench],
   ['history', 'History', ClipboardList],
+  ['artisans','Artisan Dashboard',Building2],
 ] as const;
 const officeNavigation = [
   ['dashboard','Office Inventory',Store],
@@ -174,9 +175,15 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
       {error && <p className="qty-status bad" role="alert">{error} <button type="button" onClick={() => void refresh(page, historyCompany)}>Reload stock</button></p>}
       {notice && <p className="qty-status" role="status">{notice}</p>}
       {!data && !error && <p role="status">Loading stock…</p>}
+      {data && screen === 'artisans' && <ArtisanDashboard data={data}/>}
       {data && screen === 'dashboard' && (office
         ? <OfficeDashboard data={data} company={company} setCompany={setCompany} onAction={go}/>
-        : <Dashboard data={data} company={company} setCompany={setCompany} onAction={go}/>)}
+        : <Dashboard data={data} company={company} setCompany={id => {setCompany(id);setPage(0);setHistoryCompany(id);}} onAction={go}
+          onSave={async (body,key) => {
+            await requestJson('/api/quantity-stock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,kind:'company_profile_edit',key})});
+            setNotice('Company profile updated. The new details now appear across the inventory.');
+            await refresh(0,String(body.id||''));
+          }}/>) }
       {data && ['receipt','issue','receive','manage','office-move','office-vendor'].includes(screen) && <MovementForm key={screen} screen={screen as MovementScreen}
         data={data} initialCompany={company} save={save} addMaster={addMaster} loading={loading}/>}
       {data && screen === 'history' && <History data={data} page={page} setPage={setPage} company={historyCompany} setCompany={id => {setPage(0);setHistoryCompany(id);}}
@@ -189,9 +196,22 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
   </div>;
 }
 
-function Dashboard({data, company, setCompany, onAction}: {
-  data: StockSnapshot; company: string; setCompany: (id: string) => void; onAction: (screen: Screen) => void;
+function Dashboard({data, company, setCompany, onAction,onSave}: {
+  data: StockSnapshot; company: string; setCompany: (id: string) => void; onAction: (screen: Screen) => void;onSave:Save;
 }) {
+  const selected=data.companies.find(item=>item.id===company);
+  const [editing,setEditing]=useState(false);
+  if (!selected) return <>
+    <div className="qty-title"><div><h1>Company Dashboard</h1><p>Open a company profile to view its stock and records.</p></div></div>
+    <div className="qty-category-grid">{data.companies.map(item=>{
+      const balances=data.balances.filter(row=>row.company_id===item.id);
+      return <section className="qty-category" key={item.id}><header><div><small>{item.ownership==='OWN'?'Own Product':'Jobwork company'}</small><h2>{item.name}</h2></div></header>
+        {item.contact&&<p>{item.contact}</p>}
+        <p>Raw stock <b>{count(balances.filter(row=>row.stage==='raw').reduce((n,row)=>n+row.quantity,0))} pcs</b></p>
+        <p>With artisans <b>{count(balances.filter(row=>row.stage==='artisan'||row.stage==='repair_artisan').reduce((n,row)=>n+row.quantity,0))} pcs</b></p>
+        <button type="button" onClick={()=>{setEditing(false);setCompany(item.id);}}>Open profile</button></section>;
+    })}</div>
+  </>;
   const lookup = new Map<string, {company: string; product: string; stages: Partial<Record<StockStage,number>>; received: number; issued: number; artistReturns: number}>();
   function rowFor(company: string, product: string) {
     const key = JSON.stringify([company,product]);
@@ -222,6 +242,14 @@ function Dashboard({data, company, setCompany, onAction}: {
     ['Still due to companies', rows.filter(row => data.companies.find(c => c.id === row.company)?.ownership === 'EXTERNAL').reduce((sum,row) => sum + due(row),0)],
   ] as const;
   return <>
+    <button type="button" onClick={()=>{setEditing(false);setCompany('');}}><ChevronLeft size={17}/>All companies</button>
+    <section className="qty-panel qty-staff-form"><h1>{selected.name}</h1>
+      {selected.contact&&<p><Phone size={15}/> {selected.contact}</p>}
+      {selected.address&&<p><MapPin size={15}/> {selected.address}</p>}
+      {selected.notes&&<p>{selected.notes}</p>}
+      {permitted(data.user.role,'manageData')&&<button type="button" onClick={()=>setEditing(value=>!value)}><Pencil size={16}/>Edit company details</button>}
+      {editing&&<CompanyEditor key={selected.id} company={selected} save={onSave} close={()=>setEditing(false)}/>}
+    </section>
     <div className="qty-title"><div><h1>Company Dashboard</h1><p>Stock balances by company and product category.</p></div>
       <label className="qty-field compact"><span>Company</span><select value={company} onChange={event => setCompany(event.target.value)}>
         <option value="">All companies</option>{data.companies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -258,7 +286,60 @@ function Dashboard({data, company, setCompany, onAction}: {
         .map(row => <li key={JSON.stringify([row.company_id,row.product_id,row.artisan_id,row.stage])}>
           <span><strong>{name(data.artisans,row.artisan_id)}</strong><small>{name(data.companies,row.company_id)} · {name(data.products,row.product_id)}{row.stage === 'repair_artisan' ? ' · Repair' : ''}</small></span>
           <b>{count(row.quantity)} pcs</b></li>)}</ul></section>}
+    <CompanyHistory company={company}/>
   </>;
+}
+
+function CompanyEditor({company,save,close}:{company:StockMaster;save:Save;close:()=>void}) {
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const key=useRef('');
+  async function submit(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();if(busy)return;
+    const values=Object.fromEntries(new FormData(event.currentTarget));setBusy(true);setError('');
+    key.current ||= crypto.randomUUID();
+    try {await save({id:company.id,...values,expected:{name:company.name,contact:company.contact||'',address:company.address||'',notes:company.notes||''}},key.current);close();}
+    catch(cause){setError(cause instanceof Error?cause.message:'Unable to save company.');}
+    finally{setBusy(false);}
+  }
+  return <form className="qty-form" onSubmit={submit} onChange={()=>{key.current='';}}><fieldset disabled={busy}>
+    {(['name','contact','address','notes'] as const).map(field=><label className="qty-field" key={field}><span>{field[0].toUpperCase()+field.slice(1)}</span>
+      <input name={field} required={field==='name'} maxLength={field==='name'?120:field==='contact'?300:field==='notes'?2000:1000} defaultValue={company[field]||''}/></label>)}
+    {error&&<p role="alert" className="qty-status bad">{error}</p>}
+    <button className="qty-primary" type="submit">{busy?'Saving…':'Save company'}</button>
+  </fieldset></form>;
+}
+
+function CompanyHistory({company,artisan}:{company?:string;artisan?:string}) {
+  const [data,setData]=useState<StockSnapshot|null>(null),[page,setPage]=useState(0),[error,setError]=useState('');
+  useEffect(()=>{
+    const controller=new AbortController();
+    requestJson('/api/quantity-stock?'+new URLSearchParams({company:company||'',artisan:artisan||'',page:String(page)}),{signal:controller.signal})
+      .then(result=>setData(result)).catch(cause=>{if(!controller.signal.aborted)setError(cause.message);});
+    return()=>controller.abort();
+  },[company,artisan,page]);
+  return <section className="qty-panel qty-history qty-outstanding"><h2>Movement history</h2>
+    {error&&<p role="alert">{error}</p>}
+    <ul>{data?.history.map(row=><li key={row.id}><strong>{movementLabel(row)} · {count(row.quantity)} pcs</strong>
+      <small>{name(data.companies,row.company_id)} · {name(data.products,row.product_id)} · {row.actor} · {new Date(row.created_at).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}</small></li>)}</ul>
+    <footer><button disabled={!page} onClick={()=>setPage(page-1)}>Previous</button><span>Page {page+1}</span><button disabled={!data?.more} onClick={()=>setPage(page+1)}>Next</button></footer>
+  </section>;
+}
+
+function ArtisanDashboard({data}:{data:StockSnapshot}) {
+  const [selected,setSelected]=useState('');
+  const artisan=data.artisans.find(row=>row.id===selected);
+  const balance=data.balances.filter(row=>row.artisan_id===selected&&row.quantity>0);
+  if (!artisan) return <><div className="qty-title"><div><h1>Artisan Dashboard</h1><p>Open an artisan profile to review outstanding stock and movements.</p></div></div>
+    <div className="qty-category-grid">{data.artisans.map(row=><section className="qty-category" key={row.id}><h2>{row.name}</h2>
+      <p>Outstanding <b>{count(data.balances.filter(b=>b.artisan_id===row.id).reduce((sum,b)=>sum+b.quantity,0))} pcs</b></p>
+      <button type="button" onClick={()=>setSelected(row.id)}>Open profile</button></section>)}</div></>;
+  return <><button onClick={()=>setSelected('')}><ChevronLeft size={17}/>All artisans</button>
+    <div className="qty-title"><h1>{artisan.name}</h1></div>
+    <div className="qty-category-grid">{balance.map(row=><section className="qty-category" key={JSON.stringify(row)}>
+      <small>{name(data.companies,row.company_id)}</small><h2>{name(data.products,row.product_id)}</h2>
+      <p>{stageLabels[row.stage]} <b>{count(row.quantity)} pcs</b></p></section>)}</div>
+    {!balance.length&&<p className="qty-empty">No outstanding stock with this artisan.</p>}
+    <CompanyHistory key={selected} artisan={selected}/></>;
 }
 
 function OfficeDashboard({data,company,setCompany,onAction}: {

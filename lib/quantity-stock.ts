@@ -63,7 +63,16 @@ export const needsDisputeReason = (operation: StockOperation) =>
   (stockOperations[operation].to === 'disputed' && operation !== 'receive_factory_return') ||
   ['dispute_return','office_dispute_return','office_customer_return'].includes(operation);
 
-export type StockMaster = {id: string; name: string; active: number; ownership?: string; office_only?: number};
+export type StockMaster = {
+  id: string;
+  name: string;
+  active: number;
+  ownership?: string;
+  office_only?: number;
+  contact?: string;
+  address?: string;
+  notes?: string;
+};
 export type StockBalance = {
   company_id: string;
   product_id: string;
