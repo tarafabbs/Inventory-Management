@@ -8,7 +8,7 @@ const reply = (value: unknown, status = 200) => Response.json(value, { status, h
 const reject = (s: string, status = 400) => Object.assign(new Error(s), { status });
 async function user() { const s = await inventorySession(); if (!s.staff || !s.signedIn || !permitted(s.staff.role, 'read'))
     throw reject('Sign in with an approved Google account.', 403); return s.staff; }
-const officeKinds = new Set(['office_receive', 'office_sell', 'office_return', 'office_vendor', 'vendor_return']);
+const officeKinds = new Set(['office_receive', 'office_sell', 'office_return', 'office_vendor', 'vendor_return','correct']);
 export async function GET(request: Request) {
     try {
         const u = await user();
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
         const scope = office ? " AND b.stage IN ('office_pending','office_stock','office_sold','office_return') AND (c.ownership='OWN' OR c.office_only=1)" : '';
         const results = await Promise.all([
             db.prepare(`SELECT b.* FROM inventory.production_balances b JOIN companies c ON c.id=b.company WHERE b.quantity>0 ${scope} ORDER BY b.company,b.product,b.stage`).all(),
-            db.prepare(`SELECT id,kind,event_date,reference,notes,actor,actor_role,created_at,payload,delta FROM inventory.production_events WHERE (?='' OR company=?) ${office ? "AND kind IN ('office_send','office_receive','office_sell','office_return','office_vendor','vendor_return')" : ''} ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?`).bind(company, company, page * 50).all(),
+            db.prepare(`SELECT id,kind,event_date,reference,notes,actor,actor_role,created_at,payload,delta FROM inventory.production_events WHERE (?='' OR company=? OR delta @> ?::text::jsonb) ${office ? "AND (kind IN ('office_send','office_receive','office_sell','office_return','office_vendor','vendor_return') OR kind='correct' AND payload->>'correctionKind'='office_vendor')" : ''} ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?`).bind(company, company, JSON.stringify([{company}]), page * 50).all(),
             db.prepare(`SELECT id,name,active,ownership,office_only,contact,address,notes FROM companies ${office ? "WHERE ownership='OWN' OR office_only=1" : ''} ORDER BY name`).all(),
             db.prepare(`SELECT id,name,active,office_only FROM products ${office ? "WHERE office_only=1 OR id IN (SELECT product FROM inventory.production_balances WHERE stage IN ('office_pending','office_stock','office_sold','office_return'))" : ''} ORDER BY name`).all(),
             office ? Promise.resolve({ results: [] }) : db.prepare('SELECT id,name,active,work_type,work_description,work_types,contact,address FROM artisans ORDER BY name').all(),
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
             throw reject('Choose action.');
         if (isOfficeRole(u.role) && !officeKinds.has(c.kind))
             throw reject('Office access only.', 403);
-        if (['delete', 'reset', 'undo_reset'].includes(c.kind) ? !isOwner(u.role) : c.kind === 'correct' ? !permitted(u.role, 'handoff') : !permitted(u.role, actions[c.kind].permission))
+        if (['delete', 'reset', 'undo_reset'].includes(c.kind) ? !isOwner(u.role) : c.kind === 'correct' ? !permitted(u.role, isOfficeRole(u.role)?'officeEdit':'handoff') : !permitted(u.role, actions[c.kind].permission))
             throw reject('Your access does not permit this action.', 403);
         if (c.lines !== undefined && !Array.isArray(c.lines))
             throw reject('Product lines must be a list.');
@@ -102,7 +102,7 @@ export async function POST(request: Request) {
                     };
                     delta: Delta[];
                 }>();
-                if (!old || Date.now() - old.created_at.getTime() > 5 * 3600e3)
+                if (!old || Date.now() - new Date(old.payload.originalCreatedAt||old.created_at).getTime() > 5 * 3600e3)
                     throw reject('Reset restore is available for five hours.');
                 if (await tx.prepare("SELECT id FROM inventory.production_events WHERE created_at>(SELECT created_at FROM inventory.production_events WHERE id=?::uuid) AND kind<>'migration' LIMIT 1").bind(old.id).first())
                     throw reject('New stock entries exist after this reset. Ask for a supervised restore.');
@@ -126,16 +126,18 @@ export async function POST(request: Request) {
                     throw reject('Choose entry and give correction reason.');
                 if (await tx.prepare("SELECT id FROM inventory.production_events WHERE payload->>'document'=? AND kind IN ('correct','delete')").bind(old.id).first())
                     throw reject('This entry is already corrected.');
-                if (!['issue', 'additional', 'reprint', 'return_send', 'receipt', 'receive', 'return_receive', 'dispute', 'company_return', 'payment', 'dispatch', 'opening', 'stock_count'].includes(old.kind))
+                old.kind=old.payload.correctionKind||old.kind;
+                if (!['office_vendor','issue', 'additional', 'reprint', 'return_send', 'receipt', 'receive', 'return_receive', 'dispute', 'company_return', 'payment', 'dispatch', 'opening', 'stock_count'].includes(old.kind))
                     throw reject('Linked settlement records require a supervised adjustment.');
                 if (c.kind === 'correct') {
-                    if (!['issue', 'additional', 'reprint', 'return_send'].includes(old.kind) && !isManagement(u.role))
+                    if(old.kind==='office_vendor'&&!isManagement(u.role)){if(!permitted(u.role,'officeEdit')||Date.now()-new Date(old.payload.originalCreatedAt||old.created_at).getTime()>864e5||JSON.stringify(c.lines||old.payload.lines)!==JSON.stringify(old.payload.lines))throw reject('Office receipt detail edits are limited to 24 hours; quantities stay unchanged.',403);}
+                    if (!['office_vendor','issue', 'additional', 'reprint', 'return_send'].includes(old.kind) && !isManagement(u.role))
                         throw reject('Ask Management to correct this entry.', 403);
-                    if (['issue', 'additional', 'reprint', 'return_send'].includes(old.kind) && (Date.now() - old.created_at.getTime() > 7 * 864e5 || (!isManagement(u.role) && u.role !== 'Supervisor' && old.actor_id !== u.id)))
+                    if (['issue', 'additional', 'reprint', 'return_send'].includes(old.kind) && (Date.now() - new Date(old.payload.originalCreatedAt||old.created_at).getTime() > 7 * 864e5 || (!isManagement(u.role) && u.role !== 'Supervisor' && (old.payload.originalActorId||old.actor_id) !== u.id)))
                         throw reject('Handoff correction is limited to seven days and permitted staff.', 403);
                 }
                 c.company = old.company;
-                const reversed = old.delta.map(d => ({ ...d, quantity: -d.quantity }));
+                const reversed = (old.payload.effectiveDelta||old.delta).map(d => ({ ...d, quantity: -d.quantity }));
                 const map = new Map(balances.map(b => [accountKey(b), { ...b }]));
                 for (const d of reversed) {
                     const k = accountKey(d);
@@ -149,11 +151,11 @@ export async function POST(request: Request) {
                     company: string;
                     amount: number;
                 }>()).results;
-                const money = oldMoney.map(m => ({ ...m, amount: -m.amount, kind: 'correction' }));
+                const money = (old.payload.effectiveMoney||oldMoney).map(m => ({ ...m, amount: -m.amount, kind: 'correction' }));
                 if (c.kind === 'correct') {
-                    const effective = { ...old.payload, date: c.date, notes: c.notes, lines: c.lines || old.payload.lines, amount: c.amount ?? old.payload.amount };
-                    eventPayload = { ...effective, kind: 'correct', document: old.id, correctionKind: old.kind };
+                    const effective = { ...old.payload, kind:old.kind, date: c.date,reference:c.reference??old.payload.reference, notes: c.notes, lines: c.lines || old.payload.lines, amount: c.amount ?? old.payload.amount };
                     p = planCommand(effective, [...map.values()], documents);
+                    eventPayload = { ...effective, kind: 'correct', document: old.id, correctionKind: old.kind,effectiveDelta:p.deltas,effectiveMoney:p.money,originalCreatedAt:old.payload.originalCreatedAt||old.created_at.toISOString(),originalActorId:old.payload.originalActorId||old.actor_id };
                     p.deltas = [...reversed, ...p.deltas];
                     p.money = [...money, ...p.money];
                 }
@@ -257,6 +259,7 @@ export async function POST(request: Request) {
             }
             if (c.kind === 'reset')
                 await tx.prepare('UPDATE inventory.production_documents SET voided_at=clock_timestamp() WHERE voided_at IS NULL').run();
+            if(p.damageSettle)await tx.prepare('UPDATE inventory.production_documents SET settled=settled+? WHERE id=?::uuid').bind(p.damageSettle.quantity,p.damageSettle.id).run();
             if (p.settle)
                 await tx.prepare('UPDATE inventory.production_documents SET settled=settled+?,settled_amount=settled_amount+? WHERE id=?::uuid').bind(p.settle.quantity, p.settle.amount, p.settle.id).run();
             const saved = { ok: true, id, message: 'Saved. Stock and company accounts updated.' };

@@ -35,6 +35,7 @@ export type Command = {
     reference?: string;
     notes?: string;
     company?: string;
+    product?: string;
     amount?: number;
     lines?: Line[];
     targetCompany?: string;
@@ -45,6 +46,11 @@ export type Command = {
     reason?: string;
     identifiedArtist?: string;
     factoryDamage?: boolean;
+    correctionKind?: string;
+    effectiveDelta?: Delta[];
+    effectiveMoney?: {company:string;amount:number;kind:string}[];
+    originalCreatedAt?: string;
+    originalActorId?: string;
 };
 export type Document = {
     id: string;
@@ -77,6 +83,7 @@ export type Plan = {
         quantity: number;
     };
     orderReceive?: string;
+    damageSettle?: {id:string;quantity:number};
 };
 export const labels: Record<Stage, string> = { raw: 'Raw / White', ready: 'Ready to Dispatch', hold: 'Factory Dispute / Hold', artist: 'With Artist', reprint: 'Internal Reprint', damaged: 'Total Damage', delivered: 'With Company', raw_returned: 'Raw Dispute Returned', office_pending: 'Awaiting Office', office_stock: 'Office Stock', office_sold: 'Sold', office_return: 'Return to Workshop' };
 export const normalizeArts = (s: string) => Array.from(new Set(s.split('+').map(x => x.trim()).filter(Boolean))).sort().join(' + ');
@@ -236,6 +243,7 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
             default: throw new Error('This action does not accept product lines.');
         }
     }
+    if(p.damage&&new Set(lines.map(l=>l.source?.product)).size>1)throw new Error('Record damage separately for each product category.');
     if (c.kind === 'dispatch')
         p.money.push({ company: c.company || '', amount: paise(c.amount ?? 0), kind: 'bill' });
     if (c.kind === 'payment') {
@@ -253,8 +261,11 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
         p.money.push({ company: c.company, amount: Math.sign(n) * paise(Math.abs(n)), kind: 'opening' });
     }
     if (c.kind === 'order') {
+        if(!c.product)throw new Error('Choose the replacement product category.');
         if (!c.company || !c.notes?.trim())
             throw new Error('Choose company and enter vendor / specification in remarks.');
+        const damage=documents.find(d=>d.id===c.document&&d.kind==='damage');
+        if(!damage||damage.company!==c.company||damage.payload.lines?.[0]?.source?.product!==c.product||quantity(Number(c.reason))>damage.quantity-damage.settled)throw new Error('Link this order to unsettled damage of the same company and category.');
         p.order = { company: c.company, quantity: quantity(Number(c.reason)) };
         paise(c.amount ?? 0);
     }
@@ -262,12 +273,17 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
         const d = documents.find(x => x.id === c.document);
         if (!d || d.kind !== (c.kind === 'order_receive' ? 'order' : 'damage'))
             throw new Error('Choose the unsettled damage / order.');
+        if(c.kind==='replacement'&&lines.some(l=>l.source?.product!==d.payload.lines?.[0]?.source?.product))throw new Error('Replacement category must match the damaged product.');
+        if(c.kind==='order_receive'&&lines.some(l=>l.product!==d.payload.product))throw new Error('Receive the category ordered for replacement.');
         if (c.kind === 'replacement' && d.company !== c.targetCompany)
             throw new Error('Replacement must go to the damaged company.');
         if (c.kind === 'order_receive') {
             const n = lines.reduce((s, l) => s + l.quantity, 0);
             if (d.settled + n > d.quantity || lines.some(l => (l.company || c.company) !== d.company))
                 throw new Error('Receipt exceeds the remaining replacement order.');
+            const damage=documents.find(x=>x.id===d.payload.document&&x.kind==='damage');
+            if(!damage||damage.settled+n>damage.quantity)throw new Error('The linked damage is already settled or this receipt exceeds its pending quantity.');
+            p.damageSettle={id:damage.id,quantity:n};
             p.settle = { id: d.id, quantity: n, amount: 0 };
         }
         else {

@@ -19,11 +19,30 @@ try{await sql.begin(async tx=>{
  const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});const account=(stage,arts='',work='',artisan='',pool='normal',co=company)=>({company:co,product,pool,stage,arts,work,artisan});
  const send=async(c,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/production',{method:'POST',headers:{'Content-Type':'application/json',origin:'https://im.tarafabbs.com'},body:JSON.stringify({date,...c,key})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const q=async a=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(a)}`)[0]?.quantity||0);
+ if(process.env.IMS_TEST_OFFICE_ONLY==='1'){
+  const vendor=randomUUID(),officeProduct=randomUUID();await tx`insert into inventory.companies(id,name,prefix,ownership,office_only) values(${vendor},'Test Vendor','TV','EXTERNAL',1)`;await tx`insert into inventory.products(id,name,office_only) values(${officeProduct},'Test Office Product',1)`;
+  await tx`update inventory.users set role='Office Manager' where id=${owner.id}`;globalThis.__identity={signedIn:true,staff:{...owner,role:'Office Manager'}};
+  const received=await send({kind:'office_vendor',company:vendor,reference:'Original',lines:[{company:vendor,product:officeProduct,quantity:10}]});
+  await send({kind:'correct',company:vendor,document:received.id,reference:'Corrected',notes:'Correct receipt reference'});
+  assert.equal(Number((await tx`select sum(quantity)::float8 as n from inventory.production_balances where company=${vendor}`)[0].n),10);
+  const snap=await GET(new Request('https://im.tarafabbs.com/api/production'));assert.ok((await snap.json()).history.some(e=>e.kind==='correct'));
+  globalThis.__identity={signedIn:true,staff:{...owner,role:'Office Staff'}};await send({kind:'correct',document:received.id,notes:'Not permitted'},403);
+  console.log('Office receipt detail correction and Office Staff restriction passed.');throw Error('ROLLBACK_TEST');
+ }
+ if(process.env.IMS_TEST_ORDER_ONLY==='1'){
+  await send({kind:'receipt',company,lines:[{company,product,quantity:5}]});
+  const damaged=await send({kind:'damage',company,notes:'Outside replacement test',lines:[{source:account('raw'),quantity:2}]});
+  const order=await send({kind:'order',company,product,document:damaged.id,reason:'2',amount:100,notes:'Vendor replacement'});
+  await send({kind:'order_receive',company,document:order.id,lines:[{company,product,quantity:2,outcome:'raw'}]});
+  assert.equal((await tx`select settled from inventory.production_documents where id=${damaged.id}`)[0].settled,2);assert.equal(await q(account('raw')),5);
+  console.log('Outside replacement API + PostgreSQL: 4 postings and damage settlement passed.');throw Error('ROLLBACK_TEST');
+ }
  const receipt={kind:'opening',confirm:true,company,lines:[{source:account('raw'),quantity:100}],openingDue:5000};const key=randomUUID();await send(receipt,200,key);await send(receipt,200,key);assert.equal(await q(account('raw')),100);
  await send({...receipt,openingDue:6000},409,key);
  const issued=await send({kind:'issue',company,lines:[{source:account('raw'),quantity:50,artisan:artist,artwork:'Free Hand Paint'}]});
  await send({kind:'receive',company,lines:[{source:account('artist','','Free Hand Paint',artist),quantity:20}]});
- await send({kind:'correct',company,document:issued.id,notes:'Correct 50 to 40',lines:[{source:account('raw'),quantity:40,artisan:artist,artwork:'Free Hand Paint'}]});assert.equal(await q(account('artist','','Free Hand Paint',artist)),20);assert.equal(await q(account('raw')),60);
+ const corrected=await send({kind:'correct',company,document:issued.id,notes:'Correct 50 to 40',lines:[{source:account('raw'),quantity:40,artisan:artist,artwork:'Free Hand Paint'}]});assert.equal(await q(account('artist','','Free Hand Paint',artist)),20);assert.equal(await q(account('raw')),60);
+ await send({kind:'correct',company,document:corrected.id,notes:'Correct 40 to 35',lines:[{source:account('raw'),quantity:35,artisan:artist,artwork:'Free Hand Paint'}]});assert.equal(await q(account('artist','','Free Hand Paint',artist)),15);
  await send({kind:'dispatch',company,amount:1000,lines:[{source:account('ready','Free Hand Paint'),quantity:10}]});
  await send({kind:'company_return',company,lines:[{source:account('delivered','Free Hand Paint'),quantity:4}]});
  await send({kind:'return_send',company,lines:[{source:account('hold','Free Hand Paint','','','company_return'),quantity:4,artisan:artist,artwork:'Block Print'}]});

@@ -24,7 +24,7 @@ type Event = {
     event_date: string;
     reference: string;
     notes: string;
-    actor: string;
+    actor: string;actor_id?:string;
     actor_role: string;
     created_at: string;
     reversed?: boolean;
@@ -136,7 +136,7 @@ export default function ProductionWorkspace({ office = false }: {
  {tab === 'reports' && <Reports rows={balances} company={company}/>}
  {tab === 'damage' && <><div className="prod-actions">{['damage', 'replacement', 'order', 'order_receive', 'settle'].filter(k => availableActions.includes(k)).map(k => <button key={k} onClick={() => start(k)}>{actions[k].label}</button>)}</div>{data.documents.filter(d => d.company === company).map(d => <section key={d.id}><h3>{d.kind === 'damage' ? 'Damage' : 'Replacement Order'} · {d.payload.date}</h3><p>{d.quantity} pcs · Settled/Received {d.settled} · Pending {d.quantity - d.settled}</p><p>{d.payload.notes}</p><p>Recorded cost / amount: {money(d.amount)}</p></section>)}<History data={data} company={company} save={save}/></>}
  </>}
- {screen === 'artists' && <><button onClick={() => setMaster('artisan')}>＋ Create Artisan</button><select aria-label="Select artist" value={artisan} onChange={e => setArtisan(e.target.value)}><option value="">All artisans</option>{data.artisans.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select><div className="prod-grid">{data.artisans.filter(a => (!artisan || a.id === artisan) && a.name.toLowerCase().includes(search.toLowerCase())).map(a => <section key={a.id}><h2>{a.name}</h2><p>{(a.work_types || [a.work_type]).join(', ')}</p><p>Total pending: {sum(data.balances.filter(b => b.artisan === a.id))} pcs</p><button onClick={() => setArtisan(a.id)}>View pending</button><button onClick={() => setMaster('artisan:' + a.id)}>Edit profile</button></section>)}</div><StockCards rows={data.balances.filter(b => !!b.artisan && (!artisan || b.artisan === artisan))} data={data} search={search}/></>}
+ {screen === 'artists' && <><button onClick={() => setMaster('artisan')}>＋ Create Artisan</button><select aria-label="Select artist" value={artisan} onChange={e => setArtisan(e.target.value)}><option value="">All artisans</option>{data.artisans.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select><div className="prod-grid">{data.artisans.filter(a => (!artisan || a.id === artisan) && a.name.toLowerCase().includes(search.toLowerCase())).map(a => <section key={a.id}><h2>{a.name}</h2><p>{(a.work_types || [a.work_type]).join(', ')}</p><p>Total pending: {sum(data.balances.filter(b => b.artisan === a.id))} pcs</p><button onClick={() => setArtisan(a.id)}>View pending</button><button onClick={() => setMaster('artisan:' + a.id)}>Edit profile</button></section>)}</div><StockCards rows={data.balances.filter(b => !!b.artisan && (!artisan || b.artisan === artisan))} data={data} search={search}/>{artisan&&<><ArtistSummary artisan={artisan}/><History data={data} defaultArtist={artisan} save={save}/></>}</>}
  {screen === 'company-return' && <><p>Company totals only. No bill matching. This stock never mixes with internal reprint.</p><div className="prod-actions">{['company_return', 'return_send', 'return_receive', 'dispatch'].filter(k => availableActions.includes(k)).map(k => <button key={k} onClick={() => start(k)}>{actions[k].label}</button>)}</div><StockCards rows={balances.filter(b => b.pool === 'company_return')} data={data} search={search}/></>}
  {screen === 'movement' && <div className="prod-actions">{availableActions.map(k => <button key={k} onClick={() => start(k)}>{actions[k].label}</button>)}</div>}
  {screen === 'entry' && <Entry key={kind + company} kind={kind} data={data} company={company} busy={busy} save={save} master={setMaster} onAction={start}/>}
@@ -260,10 +260,11 @@ function Entry({ kind, data, company, busy, save, master, onAction }: {
  <button type="button" onClick={addLine}>＋ Add line</button>
  <ul>{(c.lines || []).map((l, i) => <li key={i}>{l.source ? describe(l.source) : data.products.find(p => p.id === l.product)?.name} · <b>{l.quantity} pcs</b>{l.artwork ? ' · Work: ' + l.artwork : ''}{l.preferred ? ' · Preferred: ' + l.preferred : ''} <button type="button" aria-label={'Remove line ' + (i + 1)} onClick={() => edit({ lines: c.lines!.filter((_, j) => i !== j) })}>Remove</button></li>)}</ul><strong>Total: {(c.lines || []).reduce((s, l) => s + l.quantity, 0)} pcs</strong>
  </section>}
- {['replacement', 'settle', 'order_receive'].includes(kind) && <label>{kind === 'order_receive' ? 'Replacement Order' : 'Unsettled Damage'}<select required value={c.document || ''} onChange={e => edit({ document: e.target.value })}><option value="">Select record</option>{data.documents.filter(d => d.kind === (kind === 'order_receive' ? 'order' : 'damage') && d.settled < d.quantity && (!c.company || d.company === c.company)).map(d => <option key={d.id} value={d.id}>{d.payload.date} · {d.quantity - d.settled} pcs pending · {d.payload.notes}</option>)}</select></label>}
+ {['replacement', 'settle', 'order', 'order_receive'].includes(kind) && <label>{kind === 'order_receive' ? 'Replacement Order' : 'Unsettled Damage'}<select required value={c.document || ''} onChange={e => edit({ document: e.target.value })}><option value="">Select record</option>{data.documents.filter(d => d.kind === (kind === 'order_receive' ? 'order' : 'damage') && d.settled < d.quantity && (!c.company || d.company === c.company)).map(d => <option key={d.id} value={d.id}>{d.payload.date} · {d.quantity - d.settled} pcs pending · {d.payload.notes}</option>)}</select></label>}
  {kind === 'replacement' && <label>Replacement Recipient Company<select required value={c.targetCompany || c.company || ''} onChange={e => edit({ targetCompany: e.target.value })}><option value="">Select recipient</option>{data.companies.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select><button type="button" onClick={() => { onAction('order'); }}>Own stock unavailable? Choose Order from Outside in Movement</button></label>}
  {['dispatch', 'payment', 'settle', 'order', 'damage'].includes(kind) && <label>{kind === 'dispatch' ? 'Total Bill Amount (₹)' : 'Amount / Cost (₹)'}<input type="number" min="0" step="0.01" value={c.amount ?? 0} onChange={e => edit({ amount: Number(e.target.value) })}/></label>}
  {kind === 'opening' && <label>Opening Due / Advance (₹, optional)<input type="number" step="0.01" value={c.openingDue ?? ''} onChange={e => edit({ openingDue: e.target.value === '' ? undefined : Number(e.target.value) })}/></label>}
+ {kind==='order'&&<label>Replacement Product Category<select required value={c.product||''} onChange={e=>edit({product:e.target.value})}><option value="">Select product</option>{data.products.filter(p=>!p.office_only&&p.active).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
  {['settle', 'order'].includes(kind) && <label>{kind === 'settle' ? 'Damage quantity being settled' : 'Replacement quantity to order'}<input type="number" required min="1" step="1" value={c.reason || ''} onChange={e => edit({ reason: e.target.value })}/></label>}
  {kind === 'settle' && <label>Settlement Method<select value={c.settlement || ''} required onChange={e => edit({ settlement: e.target.value })}><option value="">Select method</option><option value="cash">Paid Separately — due unchanged</option><option value="due">Adjust from Company Due</option><option value="waived">Waived by Company</option></select></label>}
  {false && kind === 'stock_count' && <label>Difference<select value={c.reason || 'shortage'} onChange={e => edit({ reason: e.target.value })}><option value="shortage">Shortage — subtract</option><option value="surplus">Surplus — add</option></select></label>}
@@ -273,27 +274,29 @@ function Entry({ kind, data, company, busy, save, master, onAction }: {
  {error && <p className="prod-error" role="alert">{error}</p>}<button className="prod-primary" type="submit">{busy ? 'Saving / Checking…' : kind === 'opening' ? 'Confirm Opening Balance' : 'Save ' + actions[kind].label}</button>
  </fieldset></form>;
 }
-function History({ data, company = '', defaultKind = '', save }: {
+function History({ data, company = '', defaultKind = '', defaultArtist = '', save }: {
     data: Snapshot;
     company?: string;
     defaultKind?: string;
+    defaultArtist?: string;
     save: (c: Command, key: string) => Promise<unknown>;
 }) {
     const [records, setRecords] = useState<Event[]>([]);
     const [page, setPage] = useState(0);
     const [more, setMore] = useState(false);
     const [kind, setKind] = useState(defaultKind);
-    const [artist, setArtist] = useState('');
+    const [artist, setArtist] = useState(defaultArtist);
     const [filter, setFilter] = useState('');
     const [date, setDate] = useState('');
     const [editing, setEditing] = useState<Event>();
     const [quantities, setQuantities] = useState<number[]>([]);
-    const [amount, setAmount] = useState(0);
+    const [amount, setAmount] = useState(0);const [editDate,setEditDate]=useState(today());const [editReference,setEditReference]=useState('');
+    const semantic=(e:Event)=>e.payload.correctionKind||e.kind;
     const [reason, setReason] = useState('');
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
     const key = useRef('');
-    useEffect(()=>{setKind(defaultKind);setPage(0);},[defaultKind,company]);
+    useEffect(()=>{setKind(defaultKind);setArtist(defaultArtist);setPage(0);},[defaultKind,defaultArtist,company]);
     const params = new URLSearchParams({ company, date, search: filter, kind, artisan: artist, page: String(page) }).toString();
     useEffect(() => { let active = true; const timer = setTimeout(() => { void json('/api/production/records?' + params).then(r => { if (active) {
         setRecords(r.history);
@@ -318,9 +321,9 @@ function History({ data, company = '', defaultKind = '', save }: {
     catch (e) {
         setError((e as Error).message);
     } }
-    return <section><div className="prod-fields"><label>Search History<input value={filter} onChange={e => { setFilter(e.target.value); setPage(0); }} placeholder="Artist, artwork, action, staff…"/></label><label>Date<input type="date" value={date} onChange={e => { setDate(e.target.value); setPage(0); }}/></label></div><div className="prod-fields"><label>Action<select value={kind} onChange={e => { setKind(e.target.value); setPage(0); }}><option value="">All actions</option>{Object.entries(actions).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label><label>Artist<select value={artist} onChange={e => { setArtist(e.target.value); setPage(0); }}><option value="">All artists</option>{data.artisans.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label></div><button onClick={() => void download()}>Download matching history</button><button onClick={() => window.print()}>Print</button><p>50 records per page. Search applies to all history; exports include up to 10,000 matching records.</p>{visible.map(e => <article key={e.id} className="prod-history"><strong>{e.event_date} · {e.payload.correctionKind ? 'Correction · ' + actions[e.payload.correctionKind]?.label : actions[e.kind]?.label || e.kind}{e.reversed ? ' · REVERSED / CORRECTED' : ''}</strong><p>{e.reference ? 'Bill ' + e.reference + ' · ' : ''}{e.actor} · {e.actor_role}</p><p>{e.notes}</p>{(e.payload.lines || []).map((l, i) => <p key={i}>{data.products.find(p => p.id === (l.source?.product || l.product))?.name} · {l.quantity} pcs · {l.source?.arts || ''}{l.artwork ? ' → ' + l.artwork : ''}{l.preferred ? ' · Preferred ' + l.preferred : ''}</p>)}{e.payload.amount !== undefined && <p>Amount {money(Math.round(e.payload.amount * 100))}</p>}
- {!e.reversed && ((isManagement(data.user.role) && ['receipt', 'receive', 'return_receive', 'dispute', 'company_return', 'payment', 'dispatch', 'opening', 'stock_count'].includes(e.kind)) || (['issue', 'additional', 'reprint', 'return_send'].includes(e.kind) && permitted(data.user.role, 'handoff') && (isManagement(data.user.role) || data.user.role === 'Supervisor' || e.actor === data.user.name) && Date.now() - Date.parse(e.created_at) < 7 * 864e5)) && <button onClick={() => { setEditing(e); setQuantities((e.payload.lines || []).map(l => l.quantity)); setAmount(e.payload.amount || 0); setReason(''); key.current = ''; }}>Correct entry</button>}
- {!e.reversed && isOwner(data.user.role) && ['receipt', 'issue', 'receive', 'dispatch', 'payment', 'opening', 'stock_count'].includes(e.kind) && <button onClick={async () => { const note = window.prompt('Owner only: reason to delete / reverse this entry?'); if (!note)
+    return <section><div className="prod-fields"><label>Search History<input value={filter} onChange={e => { setFilter(e.target.value); setPage(0); }} placeholder="Artist, artwork, action, staff…"/></label><label>Date<input type="date" value={date} onChange={e => { setDate(e.target.value); setPage(0); }}/></label></div><div className="prod-fields"><label>Action<select value={kind} onChange={e => { setKind(e.target.value); setPage(0); }}><option value="">All actions</option>{Object.entries(actions).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></label><label>Artist<select value={artist} onChange={e => { setArtist(e.target.value); setPage(0); }}><option value="">All artists</option>{data.artisans.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label></div><button onClick={() => void download()}>Download matching history</button><button onClick={() => window.print()}>Print</button><p>50 records per page. Search applies to all history; exports include up to 10,000 matching records.</p>{visible.map(e => <article key={e.id} className="prod-history"><strong>{e.event_date} · {e.payload.correctionKind ? 'Correction · ' + actions[e.payload.correctionKind]?.label : actions[e.kind]?.label || e.kind}{e.reversed ? ' · REVERSED / CORRECTED' : ''}</strong><p>{e.reference ? 'Bill ' + e.reference + ' · ' : ''}{e.actor} · {e.actor_role}</p><p>{e.notes}</p>{e.payload.identifiedArtist&&<p>Identified Artist: {data.artisans.find(a=>a.id===e.payload.identifiedArtist)?.name||'Not listed'}</p>}{e.payload.factoryDamage&&<p>Total Factory Damage</p>}{(e.payload.lines || []).map((l, i) => <p key={i}>{data.products.find(p => p.id === (l.source?.product || l.product))?.name} · {l.quantity} pcs · {l.source?.arts || ''}{l.artwork ? ' → ' + l.artwork : ''}{l.preferred ? ' · Preferred ' + l.preferred : ''}</p>)}{e.payload.amount !== undefined && <p>Amount {money(Math.round(e.payload.amount * 100))}</p>}
+ {!e.reversed && (((permitted(data.user.role,'officeEdit')&&semantic(e)==='office_vendor'&&(isManagement(data.user.role)||Date.now()-Date.parse(e.payload.originalCreatedAt||e.created_at)<864e5)))||(isManagement(data.user.role) && ['receipt', 'receive', 'return_receive', 'dispute', 'company_return', 'payment', 'dispatch', 'opening', 'stock_count'].includes(semantic(e))) || (['issue', 'additional', 'reprint', 'return_send'].includes(semantic(e)) && permitted(data.user.role, 'handoff') && (isManagement(data.user.role) || data.user.role === 'Supervisor' || (e.payload.originalActorId||e.actor_id)===data.user.id) && Date.now() - Date.parse(e.payload.originalCreatedAt||e.created_at) < 7 * 864e5)) && <button onClick={() => { setEditing(e);setEditDate(e.payload.date);setEditReference(e.reference||e.payload.reference||''); setQuantities((e.payload.lines || []).map(l => l.quantity)); setAmount(e.payload.amount || 0); setReason(''); key.current = ''; }}>Correct entry</button>}
+ {!e.reversed && isOwner(data.user.role) && ['receipt', 'issue', 'receive', 'dispatch', 'payment', 'opening', 'stock_count'].includes(semantic(e)) && <button onClick={async () => { const note = window.prompt('Owner only: reason to delete / reverse this entry?'); if (!note)
             return; try {
             await save({ kind: 'delete', date: today(), document: e.id, notes: note }, crypto.randomUUID());
         }
@@ -329,7 +332,7 @@ function History({ data, company = '', defaultKind = '', save }: {
         } }}>Delete / Reverse</button>}
  {editing?.id === e.id && <form onSubmit={async (ev) => { ev.preventDefault(); if (busy)
             return; setBusy(true); key.current ||= crypto.randomUUID(); try {
-            await save({ kind: 'correct', date: today(), document: e.id, notes: reason, lines: (e.payload.lines || []).map((l, i) => ({ ...l, quantity: quantities[i] })), amount }, key.current);
+            await save({ kind: 'correct', date: editDate,reference:editReference, document: e.id, notes: reason, lines: (e.payload.lines || []).map((l, i) => ({ ...l, quantity: quantities[i] })), amount }, key.current);
             setEditing(undefined);
         }
         catch (err) {
@@ -337,7 +340,7 @@ function History({ data, company = '', defaultKind = '', save }: {
         }
         finally {
             setBusy(false);
-        } }}><h3>Correct quantities / amount</h3>{quantities.map((q, i) => <label key={i}>Line {i + 1} quantity<input type="number" min="1" step="1" required value={q} onChange={ev => { setQuantities(x => x.map((n, j) => j === i ? Number(ev.target.value) : n)); key.current = ''; }}/></label>)}{['dispatch', 'payment'].includes(e.kind) && <label>Amount (₹)<input type="number" min="0" step="0.01" value={amount} onChange={ev => { setAmount(Number(ev.target.value)); key.current = ''; }}/></label>}<label>Correction reason<input required value={reason} onChange={ev => { setReason(ev.target.value); key.current = ''; }}/></label><button disabled={busy}>Save correction</button><button type="button" onClick={() => setEditing(undefined)}>Cancel</button></form>}
+        } }}><h3>Correct entry</h3><label>Entry date<input type="date" required value={editDate} onChange={ev=>{setEditDate(ev.target.value);key.current='';}}/></label><label>Bill / Challan No. (optional)<input value={editReference} onChange={ev=>{setEditReference(ev.target.value);key.current='';}}/></label>{semantic(e)!=='office_vendor'&&quantities.map((q, i) => <label key={i}>Line {i + 1} quantity<input type="number" min="1" step="1" required value={q} onChange={ev => { setQuantities(x => x.map((n, j) => j === i ? Number(ev.target.value) : n)); key.current = ''; }}/></label>)}{['dispatch', 'payment'].includes(semantic(e)) && <label>Amount (₹)<input type="number" min="0" step="0.01" value={amount} onChange={ev => { setAmount(Number(ev.target.value)); key.current = ''; }}/></label>}<label>Correction reason<input required value={reason} onChange={ev => { setReason(ev.target.value); key.current = ''; }}/></label><button disabled={busy}>Save correction</button><button type="button" onClick={() => setEditing(undefined)}>Cancel</button></form>}
  </article>)}{!visible.length && <p>No entries on this page.</p>}<div className="prod-actions"><button disabled={!page} onClick={() => setPage(page - 1)}>Previous</button><span>Page {page + 1}</span><button disabled={!more} onClick={() => setPage(page + 1)}>Next</button></div>{error && <p role="alert" className="prod-error">{error}</p>}</section>;
 }
 function Reports({ rows, company }: {
@@ -408,3 +411,5 @@ catch (err) {
 finally {
     setBusy(false);
 } }}>Restore last reset</button>}{error && <p role="alert">{error}</p>}</section>; }
+
+function ArtistSummary({artisan}:{artisan:string}){const [data,setData]=useState<{given:number;received:number;last_activity:string}>();const [error,setError]=useState('');useEffect(()=>{let active=true;void json('/api/production/records?mode=artist&artisan='+encodeURIComponent(artisan)).then(d=>{if(active)setData(d);}).catch(e=>{if(active)setError(e.message);});return()=>{active=false;};},[artisan]);return <section><h2>Artist Work History</h2>{data&&<><p>Total work issued: {data.given} pcs · Received: {data.received} pcs</p><p>Last activity: {data.last_activity||'No activity'}</p><p>These are work occurrences; the same product may pass through this artist more than once.</p></>}{error&&<p role="alert">{error}</p>}</section>;}

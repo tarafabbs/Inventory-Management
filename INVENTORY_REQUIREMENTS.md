@@ -1,3 +1,5 @@
+> Archived original requirements. The barcode/piece model below is superseded by [PRODUCTION_REQUIREMENTS.md](PRODUCTION_REQUIREMENTS.md), approved 25 November 2026. Do not implement these archived requirements for the current app.
+
 # Saree Inventory and Barcode Management System — Requirements
 
 ## 1. Purpose

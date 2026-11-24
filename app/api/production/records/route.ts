@@ -14,7 +14,17 @@ export async function GET(request: Request) {
         if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date))
             throw Error('Invalid date.');
         const office = isOfficeRole(staff.role);
-        const scope = office ? "AND e.kind IN ('office_send','office_receive','office_sell','office_return','office_vendor','vendor_return')" : '';
+        const scope = office ? "AND (e.kind IN ('office_send','office_receive','office_sell','office_return','office_vendor','vendor_return') OR e.kind='correct' AND e.payload->>'correctionKind'='office_vendor')" : '';
+        if(q.get('mode')==='artist') {
+            if(office)return Response.json({error:'Workshop access required.'},{status:403});
+            const totals=await db.prepare(`SELECT
+              coalesce(sum(CASE WHEN e.effective_kind IN ('issue','additional','reprint','return_send','opening') AND (d->>'quantity')::int>0 THEN (d->>'quantity')::int ELSE 0 END),0)::float8 AS given,
+              coalesce(sum(CASE WHEN e.effective_kind IN ('receive','return_receive') AND (d->>'quantity')::int<0 THEN -(d->>'quantity')::int ELSE 0 END),0)::float8 AS received,
+              max(e.event_date)::text AS last_activity
+              FROM inventory.production_effective_events e CROSS JOIN LATERAL jsonb_array_elements(e.delta) d
+              WHERE d->>'artisan'=? AND d->>'stage' IN ('artist','reprint')
+            `).bind(artisan).first();return Response.json(totals,{headers:{'Cache-Control':'no-store'}});
+        }
         if (q.get('mode') === 'reports') {
             if (office)
                 return Response.json({ error: 'Workshop reports require workshop access.' }, { status: 403 });
@@ -32,11 +42,11 @@ export async function GET(request: Request) {
         }
         const limit = q.get('export') === 'true' ? 10000 : 51;
         const result = await db.prepare(`SELECT e.*,EXISTS(SELECT 1 FROM inventory.production_events r WHERE r.kind IN ('correct','delete') AND r.payload->>'document'=e.id::text) AS reversed
- FROM inventory.production_events e WHERE (?='' OR e.company=?) AND (?='' OR e.event_date=?::date)
+ FROM inventory.production_events e WHERE (?='' OR e.company=? OR e.delta @> ?::text::jsonb) AND (?='' OR e.event_date=?::date)
  AND (?='' OR e.kind=? OR (e.kind='correct' AND e.payload->>'correctionKind'=?))
  AND (?='' OR e.payload::text LIKE '%' || ? || '%')
  AND (?='' OR e.actor ILIKE ? OR e.notes ILIKE ? OR e.reference ILIKE ? OR e.payload::text ILIKE ?)
- ${scope} ORDER BY e.created_at DESC,e.id DESC LIMIT ? OFFSET ?`).bind(company, company, date, date || null, kind, kind, kind, artisan, artisan, search, '%' + search + '%', '%' + search + '%', '%' + search + '%', '%' + search + '%', limit, page * 50).all();
+ ${scope} ORDER BY e.created_at DESC,e.id DESC LIMIT ? OFFSET ?`).bind(company, company, JSON.stringify([{company}]), date, date || null, kind, kind, kind, artisan, artisan, search, '%' + search + '%', '%' + search + '%', '%' + search + '%', '%' + search + '%', limit, page * 50).all();
         return Response.json({ history: result.results.slice(0, limit === 51 ? 50 : limit), more: result.results.length === limit }, { headers: { 'Cache-Control': 'no-store' } });
     }
     catch (e) {
