@@ -50,16 +50,16 @@ async function snapshot(user: InventoryUser, companyId: string, offset: number, 
       SELECT m.id::text, m.company_id, m.product_id, m.artisan_id, m.kind,
         m.quantity + coalesce((SELECT sum(e.quantity) FROM inventory.quantity_movements e WHERE e.original_id=m.id),0) AS quantity,
         m.quantity AS original_quantity, m.previous_quantity, m.new_quantity, m.created_at,
-        m.reference, m.notes, m.actor, m.actor_id, m.received_on, m.actor_role
+        m.reference, m.notes, m.actor, m.actor_id, m.received_on, m.actor_role, m.preferred_work
       FROM inventory.quantity_movements m WHERE ${movementScope} AND (?::text = '' OR m.company_id=?)
       UNION ALL
       SELECT l.id,l.company_id,l.product_id,NULL::text,'legacy',l.accepted,l.accepted,NULL,NULL,
-        l.created_at::timestamptz,l.reference,'Receipt · ' || l.number,l.actor,NULL,nullif(left(l.received_at,10),'')::date,NULL
+        l.created_at::timestamptz,l.reference,'Receipt · ' || l.number,l.actor,NULL,nullif(left(l.received_at,10),'')::date,NULL,''
       FROM lots l WHERE l.journey=${office ? "'OFFICE'" : "'WORKSHOP'"} AND l.status<>'DRAFT' AND (?::text = '' OR l.company_id=?)
       UNION ALL
       SELECT t.id || ':' || p.company_id || ':' || p.product_id,p.company_id,p.product_id,t.artisan_id,'legacy',
         count(*),count(*),NULL,NULL,t.created_at::timestamptz,'',
-        initcap(replace(t.type,'_',' ')) || ' · ' || t.number || CASE WHEN t.status='VOIDED_BY_REVERSAL' THEN ' (reversed)' ELSE '' END,t.actor,t.created_by,NULL,NULL
+        initcap(replace(t.type,'_',' ')) || ' · ' || t.number || CASE WHEN t.status='VOIDED_BY_REVERSAL' THEN ' (reversed)' ELSE '' END,t.actor,t.created_by,NULL,NULL,''
       FROM transactions t JOIN transaction_items i ON i.transaction_id=t.id JOIN pieces p ON p.id=i.piece_id
       WHERE ${legacyTxScope} AND t.status IN ('CONFIRMED','VOIDED_BY_REVERSAL')
         AND (?::text = '' OR p.company_id=?)
@@ -67,7 +67,7 @@ async function snapshot(user: InventoryUser, companyId: string, offset: number, 
       ${office ? `UNION ALL
         SELECT a.id::text,m.company_id,m.product_id,NULL,'office_entry_edit',
           m.quantity,m.quantity,NULL,NULL,a.created_at,a.after_data->>'reference',a.after_data->>'reason',
-          a.actor,a.actor_id,(a.after_data->>'received_on')::date,a.actor_role
+          a.actor,a.actor_id,(a.after_data->>'received_on')::date,a.actor_role,''
         FROM inventory.change_audit a JOIN inventory.quantity_movements m ON m.id::text=a.target_label
         WHERE a.action='office_entry_edit' AND (?::text = '' OR m.company_id=?)` : ''}
     ), history AS (
@@ -81,7 +81,7 @@ async function snapshot(user: InventoryUser, companyId: string, offset: number, 
         'contact',c.contact,'address',c.address,'notes',c.notes
       ) ORDER BY c.name) FROM companies c WHERE ${companyScope}),'[]') AS companies,
       coalesce((SELECT jsonb_agg(jsonb_build_object('id',p.id,'name',p.name,'active',p.active,'office_only',p.office_only) ORDER BY p.name) FROM products p WHERE ${productScope}),'[]') AS products,
-      ${office ? "'[]'::jsonb" : "coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'name',name,'active',active) ORDER BY name) FROM artisans),'[]')"} AS artisans,
+      ${office ? "'[]'::jsonb" : "coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'name',name,'active',active,'work_type',work_type) ORDER BY name) FROM artisans),'[]')"} AS artisans,
       ${office ? "'[]'::jsonb" : "coalesce((SELECT jsonb_agg(jsonb_build_object('id',id,'name',name,'active',active) ORDER BY name) FROM thanwalas),'[]')"} AS thanwalas,
       coalesce((SELECT jsonb_agg(b) FROM scoped_balances b),'[]') AS balances,
       ${office ? "'[]'::jsonb" : "coalesce((SELECT jsonb_agg(t) FROM inventory.quantity_totals t),'[]')"} AS totals,
@@ -164,6 +164,11 @@ async function writeMovement(tx: StockTransaction, user: InventoryUser, body: Re
   const thanwala = kind === 'receipt' ? value(body.thanwalaId) || null : null;
   const receipt = kind === 'receipt' || kind === 'office_vendor_receipt';
   const receivedOn = receipt ? arrivalDate(body.receivedOn) : null;
+  const preferredWork=kind==='receipt'?value(body.preferredWork,300):'';
+  if(preferredWork){
+    const listed=await tx.prepare("SELECT id FROM artisans WHERE active=1 AND trim(work_type)=? LIMIT 1").bind(preferredWork).first();
+    if(!listed)throw new StockError('Choose a preferred work listed for an active artisan.');
+  }
   if (!company || !product) throw new StockError('Choose a company and product category.');
   if (needsDisputeReason(kind)) {
     if (!notes) throw new StockError('Enter the dispute reason.');
@@ -202,10 +207,10 @@ async function writeMovement(tx: StockTransaction, user: InventoryUser, body: Re
   }
   const row = await tx.prepare(`
     INSERT INTO inventory.quantity_movements
-      (company_id,product_id,artisan_id,thanwala_id,kind,from_stage,to_stage,quantity,received_on,reference,notes,actor_id,actor,actor_role)
-    VALUES (?,?,?,?,?,?,?,?,?::date,?,?,?,?,?) RETURNING id
+      (company_id,product_id,artisan_id,thanwala_id,kind,from_stage,to_stage,quantity,received_on,reference,notes,actor_id,actor,actor_role,preferred_work)
+    VALUES (?,?,?,?,?,?,?,?,?::date,?,?,?,?,?,?) RETURNING id
   `).bind(company, product, artisan || null, thanwala, kind, operation.from, operation.to, quantity,
-    receivedOn, reference, notes, user.id, user.name, roleLabel(user.role)).first<{id: string}>();
+    receivedOn, reference, notes, user.id, user.name, roleLabel(user.role),preferredWork).first<{id: string}>();
   return {ok: true, id: row?.id};
 }
 

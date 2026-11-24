@@ -394,6 +394,8 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
   const [date,setDate] = useState(today);
   const [reference,setReference] = useState('');
   const [notes,setNotes] = useState('');
+  const [preferredWork,setPreferredWork]=useState('');
+  const preferredWorks=Array.from(new Set(data.artisans.filter(row=>row.active && row.work_type?.trim()).map(row=>row.work_type!.trim()))).sort();
   const [saving,setSaving] = useState(false);
   const [error,setError] = useState('');
   const [newMaster,setNewMaster] = useState<Masters | null>(null);
@@ -440,8 +442,8 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
     key.current ||= crypto.randomUUID();
     try {
       await save({kind,companyId:company,productId:product,artisanId:artisan,thanwalaId:thanwala,
-        quantity:number,receivedOn:date,reference,notes}, key.current);
-      setQuantity('');setReference('');setNotes('');key.current = '';
+        quantity:number,receivedOn:date,reference,notes,preferredWork}, key.current);
+      setQuantity('');setReference('');setNotes('');setPreferredWork('');key.current = '';
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Unable to save stock.');
     } finally {
@@ -518,6 +520,9 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
           <label className="qty-field"><span>Quantity (pcs)</span><input required inputMode="numeric" type="number" min={1} max={maxStockQuantity} step={1} value={quantity} placeholder="0" onChange={event => {setQuantity(event.target.value);changed();}}/></label>
           {operation.from && <div className={'qty-figure ' + (exceed ? 'bad' : '')} aria-live="polite"><span>Balance after saving</span><strong>{exceed ? 'Insufficient stock' : `${count(countInStock - (hasQuantity ? number : 0))} pcs`}</strong></div>}
         </div>
+        {kind==='receipt'&&<label className="qty-field"><span>Preferred work (optional)</span><select value={preferredWork} onChange={event=>{setPreferredWork(event.target.value);changed();}}>
+          <option value="">No preference</option>{preferredWorks.map(work=><option key={work} value={work}>{work}</option>)}
+        </select></label>}
         {isReceipt && <div className="qty-fields">
           <label className="qty-field"><span>Arrival date</span><input type="date" required value={date} onChange={event => {setDate(event.target.value);changed();}}/></label>
           <label className="qty-field"><span>Bill / challan (optional)</span><input maxLength={200} value={reference} onChange={event => {setReference(event.target.value);changed();}}/></label>
@@ -575,7 +580,7 @@ function History({data,page,setPage,company,setCompany,loading,save,office}: {
       <ul>{data.history.map(row => <li key={row.id}>
         <div className="qty-history-line"><div><strong>{movementLabel(row)}</strong>
           <small>{name(data.companies,row.company_id)} · {name(data.products,row.product_id)}{row.artisan_id ? ' · ' + name(data.artisans,row.artisan_id) : ''}</small>
-          <small>{date(row.created_at)} · {row.actor}{row.actor_role ? ' · ' + row.actor_role : ''}{row.reference ? ' · Bill ' + row.reference : ''}{row.received_on ? ' · Arrival ' + row.received_on : ''}</small>
+          <small>{date(row.created_at)} · {row.actor}{row.actor_role ? ' · ' + row.actor_role : ''}{row.preferred_work ? ' · Preferred work: '+row.preferred_work : ''}{row.reference ? ' · Bill ' + row.reference : ''}{row.received_on ? ' · Arrival ' + row.received_on : ''}</small>
           {row.kind !== 'legacy' && row.notes && <small>{row.notes}</small>}</div>
           <div><b>{row.kind === 'issue_edit' ? `${row.previous_quantity} → ${row.new_quantity}` : count(row.quantity)} pcs</b>
             {office && row.kind==='office_vendor_receipt' && permitted(data.user.role,'officeEdit')

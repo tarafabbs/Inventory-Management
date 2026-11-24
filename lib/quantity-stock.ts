@@ -72,6 +72,7 @@ export type StockMaster = {
   contact?: string;
   address?: string;
   notes?: string;
+  work_type?: string;
 };
 export type StockBalance = {
   company_id: string;
@@ -102,6 +103,7 @@ export type StockHistory = {
   notes: string;
   actor: string;
   actor_role: string | null;
+  preferred_work: string;
   actor_id: string | null;
   received_on: string | null;
 };
