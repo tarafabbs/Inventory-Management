@@ -5,7 +5,7 @@ const prod=await load(await source('../lib/production.ts'));const rules=await lo
 globalThis.__prod=prod;globalThis.__rules=rules;
 const sql=postgres(process.env.SUPABASE_DATABASE_URL||process.env.POSTGRES_URL||process.env.DATABASE_URL,{ssl:'require',max:1,prepare:false});let checks=0;
 try{await sql.begin(async tx=>{
- if(!(await tx`select to_regclass('inventory.production_events') as t`)[0].t)await tx.unsafe(await source('../supabase/migrations/20261124202848_production_accounts.sql'));
+ if(!(await tx`select to_regclass('inventory.production_events') as t`)[0].t)await tx.unsafe(await source('../supabase/migrations/20261124204531_production_accounts.sql'));
  const [owner]=await tx`select id,name,role from inventory.users where role='Admin' and active=1 limit 1`;assert.ok(owner);
  globalThis.__identity={signedIn:true,staff:owner};
  const wrapper=client=>({prepare(query){let n=0;query=query.replace(/\b(FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+(companies|products|artisans|settings|users)\b/gi,'$1 inventory.$2').replace(/\?/g,()=>'$'+(++n));const stmt=args=>({bind:(...args)=>stmt(args),first:async()=>((await client.unsafe(query,args))[0]||null),all:async()=>({results:await client.unsafe(query,args)}),run:async()=>client.unsafe(query,args)});return stmt([]);},transaction:fn=>client.savepoint(inner=>fn(wrapper(inner)))});
