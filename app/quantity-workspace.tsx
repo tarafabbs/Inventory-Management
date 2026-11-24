@@ -175,7 +175,12 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
       {error && <p className="qty-status bad" role="alert">{error} <button type="button" onClick={() => void refresh(page, historyCompany)}>Reload stock</button></p>}
       {notice && <p className="qty-status" role="status">{notice}</p>}
       {!data && !error && <p role="status">Loading stock…</p>}
-      {data && screen === 'artisans' && <ArtisanDashboard data={data}/>}
+      {data && screen === 'artisans' && <ArtisanDashboard data={data} create={async values=>{
+        const result=await ledgerAction('artisanCreate',values);
+        await refresh(page,historyCompany);
+        setNotice('Artisan created. The profile and artwork options are updated.');
+        return result.id;
+      }}/>}
       {data && screen === 'dashboard' && (office
         ? <OfficeDashboard data={data} company={company} setCompany={setCompany} onAction={go}/>
         : <Dashboard data={data} company={company} setCompany={id => {setCompany(id);setPage(0);setHistoryCompany(id);}} onAction={go}
@@ -325,21 +330,61 @@ function CompanyHistory({company,artisan}:{company?:string;artisan?:string}) {
   </section>;
 }
 
-function ArtisanDashboard({data}:{data:StockSnapshot}) {
+function ArtisanDashboard({data,create}:{data:StockSnapshot;create:(values:Record<string,unknown>)=>Promise<string>}) {
   const [selected,setSelected]=useState('');
+  const [creating,setCreating]=useState(false);
+  const creator=<>{permitted(data.user.role,'masterCreate')&&<button type="button" className="qty-primary" onClick={()=>setCreating(true)}><Plus size={17}/>Create artisan</button>}
+    {creating&&<ArtisanCreator artisans={data.artisans} create={create} close={()=>setCreating(false)} onCreated={id=>{setSelected(id);setCreating(false);}}/>}</>;
   const artisan=data.artisans.find(row=>row.id===selected);
   const balance=data.balances.filter(row=>row.artisan_id===selected&&row.quantity>0);
-  if (!artisan) return <><div className="qty-title"><div><h1>Artisan Dashboard</h1><p>Open an artisan profile to review outstanding stock and movements.</p></div></div>
+  if (!artisan) return <><div className="qty-title"><div><h1>Artisan Dashboard</h1><p>Open an artisan profile to review outstanding stock and movements.</p></div></div>{creator}
     <div className="qty-category-grid">{data.artisans.map(row=><section className="qty-category" key={row.id}><h2>{row.name}</h2>
       <p>Outstanding <b>{count(data.balances.filter(b=>b.artisan_id===row.id).reduce((sum,b)=>sum+b.quantity,0))} pcs</b></p>
       <button type="button" onClick={()=>setSelected(row.id)}>Open profile</button></section>)}</div></>;
   return <><button onClick={()=>setSelected('')}><ChevronLeft size={17}/>All artisans</button>
-    <div className="qty-title"><h1>{artisan.name}</h1></div>
+    <div className="qty-title"><h1>{artisan.name}</h1></div>{creator}
     <div className="qty-category-grid">{balance.map(row=><section className="qty-category" key={JSON.stringify(row)}>
       <small>{name(data.companies,row.company_id)}</small><h2>{name(data.products,row.product_id)}</h2>
       <p>{stageLabels[row.stage]} <b>{count(row.quantity)} pcs</b></p></section>)}</div>
     {!balance.length&&<p className="qty-empty">No outstanding stock with this artisan.</p>}
     <CompanyHistory key={selected} artisan={selected}/></>;
+}
+
+function ArtisanCreator({artisans,create,close,onCreated}:{
+  artisans:StockMaster[];create:(values:Record<string,unknown>)=>Promise<string>;close:()=>void;onCreated:(id:string)=>void;
+}) {
+  const [work,setWork]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const pending=useRef(false);
+  async function submit(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();if(pending.current)return;
+    const values=Object.fromEntries(new FormData(event.currentTarget));
+    if(artisans.some(row=>row.name.trim().toLowerCase()===String(values.name).trim().toLowerCase())){
+      setError('This artisan is already listed. Open their profile.');return;
+    }
+    pending.current=true;setBusy(true);setError('');
+    try{onCreated(await create(values));}
+    catch(cause){setError(cause instanceof Error?cause.message:'Unable to create artisan.');}
+    finally{pending.current=false;setBusy(false);}
+  }
+  return <form className="qty-panel qty-form qty-staff-form" onSubmit={submit}><fieldset disabled={busy}>
+    <h2>Create artisan</h2><div className="qty-fields">
+      <label className="qty-field"><span>Artisan name</span><input name="name" autoFocus required maxLength={120}/></label>
+      <label className="qty-field"><span>Contact (optional)</span><input name="contact" type="tel" maxLength={200}/></label>
+      <label className="qty-field"><span>Artwork / work type</span><select name="work_type" required value={work} onChange={event=>setWork(event.target.value)}>
+        <option value="">Select artwork</option>{artisanWorkTypes.map(type=><option key={type}>{type}</option>)}</select></label>
+    </div>
+    {work==='Others'&&<label className="qty-field"><span>Work description</span><input name="work_description" required maxLength={300}/></label>}
+    <label className="qty-field"><span>Address (optional)</span><textarea name="address" maxLength={1000} rows={2}/></label>
+    <div className="qty-fields">
+      <label className="qty-field"><span>GST No. (optional)</span><input name="gst_no" maxLength={15} autoCapitalize="characters"/></label>
+      <label className="qty-field"><span>PAN (optional)</span><input name="pan_no" maxLength={10} autoCapitalize="characters"/></label>
+      <label className="qty-field"><span>Aadhaar (optional)</span><input name="aadhaar_no" inputMode="numeric" maxLength={14} autoComplete="off"/></label>
+    </div>
+    {error&&<p role="alert" className="qty-status bad">{error}</p>}
+    <div className="qty-quick"><button type="button" onClick={close}>Cancel</button><button className="qty-primary" type="submit">{busy?'Creating…':'Create artisan'}</button></div>
+  </fieldset></form>;
 }
 
 function OfficeDashboard({data,company,setCompany,onAction}: {

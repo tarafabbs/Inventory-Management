@@ -1,5 +1,6 @@
 import { db } from '@/lib/database';
 import { inventorySession } from '@/lib/inventory-identity';
+import {artisanIdentity} from '@/lib/artisan-identity';
 import { permitted, quantities, uniqueLines, scanError, roles, artisanWorkTypes, isOfficeRole, canManageUser, canReverseTransaction, canUndoMovement, isOwner, roleLabel } from '../../../lib/rules';
 import {workshopOperation} from '../../../lib/workshop';
 import {intakeOperation} from '../../../lib/intake-server';
@@ -109,7 +110,7 @@ export async function POST(req:Request){let user:any,b:any;try{const origin=req.
 if(retiredWorkshopWrites.has(op)){
  throw fail('Inventory movements now use quantities. Open your stock workspace and choose the corresponding action.',409);
 }
-const privilege=['saveScanDraft','discardScanDraft'].includes(op)?(v.type==='handoff'?'handoff':v.type==='return'?'return':'invalid'):({adminDataEdit:'manageData',adminDataDelete:'adminData',adminDataDeleteAll:'adminData',adminDataUndo:'manageData',undoRecentScan:'undoScan',assignThanwala:'backfillThanwala',officeEntryEdit:'officeEdit',officeMasterEdit:'officeMaster',officeMasterCreate:'officeMaster',recoveryReport:'recovery',recoveryCreate:isOfficeRole(user.role)?'officeEntry':'recovery',recoveryStart:'recovery',recoveryConfirm:'recovery',recoveryCancel:'recovery',officeNewEntry:'officeEntry',officeLabel:'officeLabel',groundStaff:'master',jobworkDispatch:'postFinish',jobworkReturn:'postFinish',officeSend:'postFinish',officeReceive:'officeReceive',officeSell:'officeSell',officeReturn:'officeReturn',customerReturn:'officeReturn',factoryReceive:'postFinish',artistTransfer:'handoff',groundSend:'groundSend',groundDispute:'dispute',finishReceive:'finishReceive',reprintOut:'reprintOut',reprintReceive:'reprintReceive',stockDispute:'dispute',prepareReceipt:'receipt',updatePreparedReceipt:'receipt',intake:'label',supplierReturn:'supplierReturn',dispute:'dispute',master:v.id?'master':'masterCreate',user:'user',settings:'settings',receipt:'receipt',draft:'draft',label:'label',handoff:'handoff',return:'return',check:'check',observe:'check',closeCheck:'check',adjust:'adjust',reverse:'undoScan',exception:'exceptionReport',resolve:'exception'} as any)[op];if(!privilege||!permitted(user.role,privilege))throw fail('Your role does not permit this action.',403);
+const privilege=['saveScanDraft','discardScanDraft'].includes(op)?(v.type==='handoff'?'handoff':v.type==='return'?'return':'invalid'):({adminDataEdit:'manageData',adminDataDelete:'adminData',adminDataDeleteAll:'adminData',adminDataUndo:'manageData',undoRecentScan:'undoScan',assignThanwala:'backfillThanwala',officeEntryEdit:'officeEdit',officeMasterEdit:'officeMaster',officeMasterCreate:'officeMaster',recoveryReport:'recovery',recoveryCreate:isOfficeRole(user.role)?'officeEntry':'recovery',recoveryStart:'recovery',recoveryConfirm:'recovery',recoveryCancel:'recovery',officeNewEntry:'officeEntry',officeLabel:'officeLabel',groundStaff:'master',jobworkDispatch:'postFinish',jobworkReturn:'postFinish',officeSend:'postFinish',officeReceive:'officeReceive',officeSell:'officeSell',officeReturn:'officeReturn',customerReturn:'officeReturn',factoryReceive:'postFinish',artistTransfer:'handoff',groundSend:'groundSend',groundDispute:'dispute',finishReceive:'finishReceive',reprintOut:'reprintOut',reprintReceive:'reprintReceive',stockDispute:'dispute',prepareReceipt:'receipt',updatePreparedReceipt:'receipt',intake:'label',supplierReturn:'supplierReturn',dispute:'dispute',artisanCreate:'masterCreate',master:v.id?'master':'masterCreate',user:'user',settings:'settings',receipt:'receipt',draft:'draft',label:'label',handoff:'handoff',return:'return',check:'check',observe:'check',closeCheck:'check',adjust:'adjust',reverse:'undoScan',exception:'exceptionReport',resolve:'exception'} as any)[op];if(!privilege||!permitted(user.role,privilege))throw fail('Your role does not permit this action.',403);
 const statements:any[]=[],time=now(),actor=user.name;let result:any={ok:true};const add=(sql:string,...args:any[])=>statements.push(db.prepare(sql).bind(...args));const guard=(sql:string,...args:any[])=>{const id=uuid();add(`INSERT INTO guards(id,ok) VALUES(?,CASE WHEN (${sql}) THEN 1 ELSE 0 END)`,id,...args);add('DELETE FROM guards WHERE id=?',id);};
 const event=(p:any,type:string,before:any,after:any,reason:string,tx:string|null=null)=>add('INSERT INTO piece_events(id,piece_id,type,transaction_id,actor,created_at,reason,before_state,after_state) VALUES(?,?,?,?,?,?,?,?,?)',uuid(),p.id,type,tx,actor,time,reason,before?JSON.stringify(before):null,JSON.stringify(after));
 const move=(p:any,type:string,after:any,reason:string,tx:string)=>{guard('SELECT COUNT(*)=1 FROM pieces WHERE id=? AND version=?',p.id,p.version);add('UPDATE pieces SET holder=?,artisan_id=?,ground_staff_id=?,condition=?,label_confirmed_at=?,version=version+1 WHERE id=?',after.holder,after.artisan_id||null,after.holder==='GROUND_STAFF'?after.ground_staff_id:null,after.condition,Object.prototype.hasOwnProperty.call(after,'label_confirmed_at')?after.label_confirmed_at:p.label_confirmed_at,p.id);event(p,type,p,{...after,version:p.version+1},reason,tx);add('INSERT INTO transaction_items(id,transaction_id,piece_id,before_state,after_state) VALUES(?,?,?,?,?)',uuid(),tx,p.id,JSON.stringify(p),JSON.stringify({...p,...after,version:p.version+1}));};
@@ -210,6 +211,23 @@ else if(op==='user'){
  add('INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label,before_data,after_data) VALUES(?,?,?,?,?,?::jsonb,?::jsonb)',
   user.id,user.name,roleLabel(user.role),target?'staff_updated':'staff_added',email,target?JSON.stringify(target):null,
   JSON.stringify({id,name,email,role:v.role,active}));
+ result={ok:true,id};
+}
+else if(op==='artisanCreate'){
+ const name=typeof v.name==='string'?v.name.trim():'';
+ const contact=typeof v.contact==='string'?v.contact.trim():'';
+ const address=typeof v.address==='string'?v.address.trim():'';
+ const description=typeof v.work_description==='string'?v.work_description.trim():'';
+ if(!name||name.length>120||contact.length>200||address.length>1000||description.length>300)throw fail('Enter a name and keep the details within the field limits.');
+ if(!artisanWorkTypes.includes(v.work_type)||(v.work_type==='Others'&&!description))throw fail('Choose an artwork and describe Others.');
+ const {gst,pan,aadhaar}=artisanIdentity(v);
+ add("SELECT pg_advisory_xact_lock(hashtext('artisan-create'),hashtext(?))",name.toLowerCase());
+ guard('SELECT COUNT(*)=0 FROM artisans WHERE lower(trim(name))=?',name.toLowerCase());
+ const id=uuid();
+ add('INSERT INTO artisans(id,name,contact,address,work_type,work_description,gst_no,pan_no,aadhaar_no) VALUES(?,?,?,?,?,?,?,?,?)',
+  id,name,contact,address,v.work_type,v.work_type==='Others'?description:'',gst,pan,aadhaar);
+ add('INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label) VALUES(?,?,?,?,?)',
+  user.id,user.name,roleLabel(user.role),'artisan_created',name);
  result={ok:true,id};
 }
 else if(op==='officeMasterCreate'){
