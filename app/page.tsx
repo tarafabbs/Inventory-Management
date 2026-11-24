@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import {productionSnapshot} from '@/lib/production-snapshot';
+import type {Snapshot} from '@/lib/production-types';
 import ProductionWorkspace from "./production-workspace";
 import SignOutButton from "./sign-out-button";
 import {inventorySession} from "@/lib/inventory-identity";
@@ -16,5 +18,9 @@ export default async function Page({searchParams}: {searchParams: Promise<{view?
   </main>;
 
   const office = isOfficeRole(staff.role) || (isManagement(staff.role) && (await searchParams).view === "Office");
-  return <ProductionWorkspace office={office}/>;
+  let initialData:Snapshot|undefined;
+  let initialError='';
+  try{initialData=await productionSnapshot(staff,{office});}
+  catch(error){console.error('Initial stock snapshot failed',error instanceof Error?error.name:'unknown');initialError='Stock could not be loaded. Please retry.';}
+  return <ProductionWorkspace office={office} initialData={initialData} initialError={initialError}/>;
 }

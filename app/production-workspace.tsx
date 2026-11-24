@@ -5,71 +5,34 @@ import { artisanWorkTypes, isManagement, isOfficeRole, isOwner, permitted } from
 import SignOutButton from './sign-out-button';
 import StaffManagement from './staff-management';
 import './production.css';
-type Master = {
-    id: string;
-    name: string;
-    active: number;
-    ownership?: string;
-    office_only?: number;
-    contact?: string;
-    address?: string;
-    notes?: string;
-    work_type?: string;
-    work_description?: string;
-    work_types?: string[];
-};
-type Event = {
-    id: string;
-    kind: string;
-    event_date: string;
-    reference: string;
-    notes: string;
-    actor: string;actor_id?:string;
-    actor_role: string;
-    created_at: string;
-    reversed?: boolean;
-    payload: Command & {
-        correctionKind?: string;
-    };
-    delta: (Account & {
-        quantity: number;
-    })[];
-};
-type Snapshot = {
-    user: {
-        id: string;
-        name: string;
-        role: string;
-    };
-    balances: Balance[];
-    companies: Master[];
-    products: Master[];
-    artisans: Master[];
-    money: {
-        company: string;
-        due: number;
-    }[];
-    documents: Document[];
-    history: Event[];
-    more: boolean;
-    openingDate: string;
-};
+import type {Master,Event,Snapshot} from '@/lib/production-types';
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 const money = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(n / 100);
-async function json(url: string, init?: RequestInit) { const r = await fetch(url, { ...init, cache: 'no-store' }); const d = await r.json(); if (!r.ok)
-    throw new Error(d.error || 'Could not complete request.'); return d; }
+async function json(url:string,init?:RequestInit) {
+    try {
+        const response=await fetch(url,{...init,cache:'no-store',signal:init?.signal||AbortSignal.timeout(20_000)});
+        const result=await response.json();
+        if(!response.ok)throw new Error(result.error||'Could not complete request.');
+        return result;
+    } catch(error) {
+        if(error instanceof Error&&['AbortError','TimeoutError'].includes(error.name))throw new Error('The connection took too long. Retry to load stock or check this save.');
+        throw error;
+    }
+}
 const post = (url: string, body: unknown) => json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-export default function ProductionWorkspace({ office = false }: {
+export default function ProductionWorkspace({ office = false,initialData,initialError='' }: {
     office?: boolean;
+    initialData?:Snapshot;
+    initialError?:string;
 }) {
-    const [data, setData] = useState<Snapshot>();
+    const [data, setData] = useState<Snapshot|undefined>(initialData);
     const [screen, setScreen] = useState('home');
     const [company, setCompany] = useState('');
     const [artisan, setArtisan] = useState('');
     const [tab, setTab] = useState('stock');
     const [kind, setKind] = useState('receipt');
     const [page, setPage] = useState(0);
-    const [error, setError] = useState('');
+    const [error, setError] = useState(initialError);
     const [notice, setNotice] = useState('');
     const [search, setSearch] = useState('');
     const [menu, setMenu] = useState(false);
@@ -86,7 +49,8 @@ export default function ProductionWorkspace({ office = false }: {
     catch (e) {
         setError((e as Error).message);
     } }, [company, page, office]);
-    useEffect(() => { void refresh(); }, [refresh]);
+    const hasInitialSnapshot=useRef(!!initialData);
+    useEffect(() => { if(hasInitialSnapshot.current){hasInitialSnapshot.current=false;return;}void refresh(); }, [refresh]);
     function go(s: string) { if (['home', 'companies', 'artists'].includes(s)) {
         setCompany('');
         setArtisan('');
@@ -103,7 +67,7 @@ export default function ProductionWorkspace({ office = false }: {
         setBusy(false);
     } }
     if (!data)
-        return <main className="prod"><h1>IMS TARA MAA</h1><p role="status">{error || 'Loading your stock…'}</p><button onClick={() => void refresh()}>Reload</button></main>;
+        return <main className="prod prod-loading"><h1>IMS TARA MAA</h1><p role="status">{error || 'Loading your stock…'}</p><button onClick={() => void refresh()}>Reload</button></main>;
     const name = (items: Master[], id: string) => items.find(m => m.id === id)?.name || id;
     const balances = data.balances.filter(b => (!company || b.company === company) && (!artisan || b.artisan === artisan));
     const onSite = balances.filter(b => ['raw', 'ready', 'hold', 'office_stock'].includes(b.stage));

@@ -11,6 +11,8 @@ try{await sql.begin(async tx=>{
  const wrapper=client=>({prepare(query){let n=0;query=query.replace(/\b(FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+(companies|products|artisans|settings|users)\b/gi,'$1 inventory.$2').replace(/\?/g,()=>'$'+(++n));const stmt=args=>({bind:(...args)=>stmt(args),first:async()=>((await client.unsafe(query,args))[0]||null),all:async()=>({results:await client.unsafe(query,args)}),run:async()=>client.unsafe(query,args)});return stmt([]);},transaction:fn=>client.savepoint(inner=>fn(wrapper(inner)))});
  globalThis.__db=wrapper(tx);
  let api=await source('../app/api/production/route.ts');api=api.replace(/import \{\s*db\s*\} from '@\/lib\/database';/, 'const db=globalThis.__db;').replace(/import \{\s*inventorySession\s*\} from '@\/lib\/inventory-identity';/,'const inventorySession=async()=>globalThis.__identity;').replace(/import \{[^;]+\} from '@\/lib\/rules';/,'const {isManagement,isOfficeRole,isOwner,permitted,roleLabel}=globalThis.__rules;').replace(/import \{[^;]+\} from '@\/lib\/production';/,'const {actions,accountKey,planCommand}=globalThis.__prod;');
+ globalThis.__snapshot=await load((await source('../lib/production-snapshot.ts')).replace("import {db} from './database';",'const db=globalThis.__db;'));
+ api=api.replace(/import \{productionSnapshot\} from '@\/lib\/production-snapshot';/,'const {productionSnapshot}=globalThis.__snapshot;');
  const {POST,GET}=await load(api);
  const company=randomUUID(),own=randomUUID(),product=randomUUID(),artist=randomUUID();
  await tx`insert into inventory.companies(id,name,prefix,ownership) values(${company},'Test Company','TC','EXTERNAL'),(${own},'Test Own','TO','OWN')`;

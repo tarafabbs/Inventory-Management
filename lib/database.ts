@@ -79,9 +79,27 @@ class PreparedStatement {
     return db.unsafe(postgresSql(this.source), this.args);
   }
 
-  async first<T = Record<string, unknown>>(): Promise<T | null> {
-    const rows = await this.execute();
-    return (rows[0] as T | undefined) ?? null;
+  async first<T = Record<string, unknown>>(timeoutMs?: number): Promise<T | null> {
+    if (!timeoutMs) {
+      const rows = await this.execute();
+      return (rows[0] as T | undefined) ?? null;
+    }
+    const query = (this.transaction ?? connection()).unsafe(postgresSql(this.source), this.args);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const rows = await Promise.race([
+        query.then(rows => rows),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            query.cancel();
+            reject(new Error("Stock loading timed out. Please retry."));
+          }, timeoutMs);
+        }),
+      ]);
+      return (rows[0] as T | undefined) ?? null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async all<T = Record<string, unknown>>() {

@@ -1,3 +1,4 @@
+import {productionSnapshot} from '@/lib/production-snapshot';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '@/lib/database';
 import { inventorySession } from '@/lib/inventory-identity';
@@ -16,18 +17,7 @@ export async function GET(request: Request) {
         const page = Math.max(0, Math.min(10000, Number(q.get('page')) || 0));
         const company = q.get('company') || '';
         const office = isOfficeRole(u.role) || (isManagement(u.role) && q.get('view') === 'office');
-        const scope = office ? " AND b.stage IN ('office_pending','office_stock','office_sold','office_return') AND (c.ownership='OWN' OR c.office_only=1)" : '';
-        const results = await Promise.all([
-            db.prepare(`SELECT b.* FROM inventory.production_balances b JOIN companies c ON c.id=b.company WHERE b.quantity>0 ${scope} ORDER BY b.company,b.product,b.stage`).all(),
-            db.prepare(`SELECT id,kind,event_date,reference,notes,actor,actor_role,created_at,payload,delta FROM inventory.production_events WHERE (?='' OR company=? OR delta @> ?::text::jsonb) ${office ? "AND (kind IN ('office_send','office_receive','office_sell','office_return','office_vendor','vendor_return') OR kind='correct' AND payload->>'correctionKind'='office_vendor')" : ''} ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?`).bind(company, company, JSON.stringify([{company}]), page * 50).all(),
-            db.prepare(`SELECT id,name,active,ownership,office_only,contact,address,notes FROM companies ${office ? "WHERE ownership='OWN' OR office_only=1" : ''} ORDER BY name`).all(),
-            db.prepare(`SELECT id,name,active,office_only FROM products ${office ? "WHERE office_only=1 OR id IN (SELECT product FROM inventory.production_balances WHERE stage IN ('office_pending','office_stock','office_sold','office_return'))" : ''} ORDER BY name`).all(),
-            office ? Promise.resolve({ results: [] }) : db.prepare('SELECT id,name,active,work_type,work_description,work_types,contact,address FROM artisans ORDER BY name').all(),
-            office ? Promise.resolve({ results: [] }) : db.prepare('SELECT company,sum(amount)::float8 AS due FROM inventory.production_money GROUP BY company').all(),
-            office ? Promise.resolve({ results: [] }) : db.prepare('SELECT * FROM inventory.production_documents WHERE voided_at IS NULL ORDER BY created_at DESC').all(),
-            db.prepare("SELECT value FROM settings WHERE key='production_opening_date'").first(),
-        ]);
-        return reply({ user: { id: u.id, name: u.name, role: u.role }, balances: results[0].results, history: results[1].results.slice(0, 50), more: results[1].results.length > 50, companies: results[2].results, products: results[3].results, artisans: results[4].results, money: results[5].results, documents: results[6].results, openingDate: results[7]?.value || '' });
+        return reply(await productionSnapshot(u,{company,page,office}));
     }
     catch (e) {
         return failure(e);
