@@ -55,7 +55,7 @@ export default function ProductionWorkspace({ office = false,initialData,initial
     } }, [company, page, office]);
     const hasInitialSnapshot=useRef(!!initialData);
     useEffect(() => { if(hasInitialSnapshot.current){hasInitialSnapshot.current=false;return;}void refresh(); }, [refresh]);
-    function go(s: string) { if (['home', 'companies', 'artists'].includes(s)) {
+    function go(s: string) { if (['home', 'companies', 'artists', 'factory-disputes'].includes(s)) {
         setCompany('');
         setArtisan('');
         setPage(0);

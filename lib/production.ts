@@ -112,6 +112,7 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
         throw new Error('Date cannot be in the future.');
     const p: Plan = { deltas: [], money: [] };
     const current = new Map(balances.map(b => [accountKey(b), b.quantity]));
+    const receiptSources = new Map<string, number>();
     const add = (a: Account, n: number) => { if (!a.company || !a.product || !stages.includes(a.stage) || !['normal', 'company_return'].includes(a.pool))
         throw new Error('Choose a valid company, product and stock account.'); if (a.pool === 'company_return' && !['hold', 'artist', 'ready', 'damaged'].includes(a.stage))
         throw new Error('Invalid Company Return location.'); const artist = ['artist', 'reprint'].includes(a.stage); if (artist !== !!a.artisan || (!artist && !!a.work))
@@ -160,6 +161,13 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
             case 'receive':
             case 'return_receive':
                 a = source(l, ['artist', 'reprint'], c.kind === 'receive' ? 'normal' : 'company_return');
+                {
+                    const key = accountKey(a);
+                    const received = (receiptSources.get(key) || 0) + n;
+                    if (received > (balances.find(b => accountKey(b) === key)?.quantity || 0))
+                        throw new Error('Available stock changed or the quantity exceeds this balance. Reload and review.');
+                    receiptSources.set(key, received);
+                }
                 if (l.disputeQuantity !== undefined) {
                     const disputed = l.disputeQuantity;
                     if (c.kind !== 'receive' || l.outcome === 'hold' || !Number.isSafeInteger(disputed) || disputed < 0 || disputed > n)

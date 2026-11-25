@@ -29,6 +29,7 @@ const repaint = { ...silk, stage: 'reprint' };
 post({ kind:'receive', date, lines:[{source:repaint,quantity:3,disputeQuantity:1}] });
 assert.equal(q(repaint),1);assert.equal(q({...silk,stage:'ready',artisan:'',work:'',arts:'R'}),19);
 post({kind:'receive',date,lines:[{source:silk,quantity:4,disputeQuantity:4}]});assert.equal(q(repaint),5);assert.equal(q(silk),26);
+assert.throws(()=>planCommand({kind:'receive',date,lines:[{source:repaint,quantity:5,disputeQuantity:5},{source:repaint,quantity:5,disputeQuantity:5}]},balances), 'A repaint credit cannot be received a second time within the same entry');
 for(const n of [-1,21,0.5,NaN])assert.throws(()=>planCommand({kind:'receive',date,lines:[{source:silk,quantity:20,disputeQuantity:n}]},balances));
 assert.throws(()=>artisanReceiptCommand({...draft,artisan:'Z'},balances));
 assert.throws(()=>artisanReceiptCommand({...draft,quantities:{[accountKey(returned)]:1}},balances));
