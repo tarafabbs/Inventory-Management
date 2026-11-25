@@ -131,3 +131,5 @@
   .qty-account > span {display: none}
   .qty-app .qty-primary[type="submit"] {width: 100%; min-height: 46px}
 }
+
+.qty-archive-notice{border:2px solid #9e83ca;background:#f5f0ff}.qty-archive-notice h1{font-size:1.25rem}.qty-archive-notice a{display:inline-flex;align-items:center;min-height:44px;padding:10px 14px;border:1px solid #d0c4e0;border-radius:10px;text-decoration:none}.qty-archive-notice .qty-primary{color:white}

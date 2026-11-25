@@ -22,19 +22,20 @@ async function json(url:string,init?:RequestInit) {
     }
 }
 const post = (url: string, body: unknown) => json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-export default function ProductionWorkspace({ office = false,initialData,initialError='' }: {
+export default function ProductionWorkspace({ office = false,initialData,initialError='',initialAction='' }: {
     office?: boolean;
     initialData?:Snapshot;
     initialError?:string;
+    initialAction?:string;
 }) {
     const {t:tr}=useInventoryLanguage();
 
     const [data, setData] = useState<Snapshot|undefined>(initialData);
-    const [screen, setScreen] = useState('home');
+    const [screen, setScreen] = useState(initialAction ? 'entry' : 'home');
     const [company, setCompany] = useState('');
     const [artisan, setArtisan] = useState('');
     const [tab, setTab] = useState('stock');
-    const [kind, setKind] = useState('receipt');
+    const [kind, setKind] = useState(initialAction || 'receipt');
     const [page, setPage] = useState(0);
     const [error, setError] = useState(initialError);
     const [notice, setNotice] = useState('');
@@ -92,7 +93,7 @@ export default function ProductionWorkspace({ office = false,initialData,initial
         start('stock_count');
     }
     else
-        go(s); }}>{tr(titles[s])}</button>)}<button onClick={() => start(office ? 'office_receive' : 'receipt')}>{tr("＋ New Entry")}</button><button onClick={() => go('movement')}>{tr("Stock Movement")}</button>{isManagement(data.user.role) && <a href={office ? '/' : '/?view=Office'}>{office ? tr("Workshop") : tr("Office")}  {tr("Inventory")}</a>}<button onClick={() => go('catalog')}>{tr("Manage Profiles")}</button><a href="/archive">{tr("Previous History / Data Control")}</a><SignOutButton /></aside>
+        go(s); }}>{tr(titles[s])}</button>)}<button onClick={() => start(office ? 'office_receive' : 'receipt')}>{tr("＋ New Entry")}</button><button onClick={() => go('movement')}>{tr("Stock Movement")}</button>{isManagement(data.user.role) && <a href={office ? '/' : '/?view=Office'}>{office ? tr("Workshop") : tr("Office")}  {tr("Inventory")}</a>}<button onClick={() => go('catalog')}>{tr("Manage Profiles")}</button><a href="/archive">{tr("Previous History (read only)")}</a><SignOutButton /></aside>
  <main className="prod-main">
  {error && <p role="alert" className="prod-error">{tr(error)} <button onClick={() => void refresh()}>{tr("Reload")}</button></p>}{notice && <p role="status" className="prod-success">{tr(notice)}</p>}
  <div className="prod-heading"><h1>{screen === 'entry' ? tr(actions[kind]?.label||'') : screen === 'company' ? companyData?.name : tr(titles[screen] || 'Stock Management')}</h1><input aria-label={tr("Search companies, artists or stock")} placeholder={tr("Search…")} value={search} onChange={e => setSearch(e.target.value)}/></div>

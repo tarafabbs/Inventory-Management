@@ -25,6 +25,7 @@ let compiled=ts.transpileModule(ui,{compilerOptions:{module:ts.ModuleKind.ESNext
 const {default:Workspace}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
 const html=renderToString(React.createElement(Workspace,{initialData}));
 assert.ok(html.includes('Total in our custody'),'First render contains stock dashboard');assert.ok(html.includes('Company Return'),'First render contains working navigation');assert.ok(html.includes('Opening Balance'));assert.ok(!html.includes('Loading your stock'),'An authenticated first render must not be a client-only loading screen');
+const entry=renderToString(React.createElement(Workspace,{initialData,initialAction:'receipt'}));assert.ok(entry.includes('Product Lines')&&entry.includes('Save New Entry'),'Current new-entry link must open the production receipt form');
 const failed=renderToString(React.createElement(Workspace,{initialError:'Connection unavailable'}));assert.ok(failed.includes('Connection unavailable'));assert.ok(failed.includes('Reload'));
 console.log('PASS: single-query stock snapshot, Office scope, initial dashboard rendering and retry fallback.');
 if(process.argv.includes('--database')){

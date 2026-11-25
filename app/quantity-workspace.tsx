@@ -60,7 +60,7 @@ async function requestJson(url: string, init?: RequestInit) {
   return data;
 }
 
-export default function QuantityWorkspace({office = false}: {office?:boolean}) {
+export default function QuantityWorkspace({office = false, readOnly = true}: {office?:boolean;readOnly?:boolean}) {
     const {t:tr}=useInventoryLanguage();
 
   const [data, setData] = useState<StockSnapshot | null>(null);
@@ -92,6 +92,7 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
   useEffect(() => {void refresh(page, historyCompany);}, [page, historyCompany, refresh]);
 
   const go = (next: Screen) => {
+    if (readOnly && !['dashboard','history','artisans'].includes(next)) return;
     menu.current?.close();
     setNotice('');
     setError('');
@@ -99,6 +100,7 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
   };
 
   const save: Save = async (body, key) => {
+    if (readOnly) throw new Error('Previous history is read-only. Open current Stock Management for new entries.');
     await requestJson('/api/quantity-stock', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({...body, key}),
     });
@@ -107,6 +109,7 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
   };
 
   async function ledgerAction(operation: string, body: Record<string, unknown>) {
+    if (readOnly) throw new Error('Previous history is read-only. Open current Stock Management for new entries.');
     return requestJson('/api/ledger', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({op:operation,key:crypto.randomUUID(),data:body}),
@@ -129,6 +132,7 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
   }
 
   async function addMaster(kind: Masters, entryName: string, workType: string, description: string, ownership: string) {
+    if (readOnly) throw new Error('Previous history is read-only. Open current Stock Management for new entries.');
     const result = await requestJson('/api/ledger', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({op: office ? 'officeMasterCreate' : 'master', key: crypto.randomUUID(), data: {
@@ -142,6 +146,7 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
 
   const role = data?.user.role || '';
   const shownTabs = [...(office ? officeNavigation : navigation), ...managementNavigation].filter(([key]) => (
+    (!readOnly || ['dashboard','history','artisans'].includes(key)) && (
     key === 'staff' ? isOwner(role) :
     key === 'data' ? permitted(role,'manageData') :
     key === 'office-vendor' ? permitted(role,'officeEntry') :
@@ -151,12 +156,12 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
     key === 'issue' ? permitted(role,'handoff') :
     key === 'receive' ? permitted(role,'return') :
     key === 'manage' ? extraOperations.some(operation => permitted(role, stockOperations[operation].permission)) : true
-  ));
+  )));
 
   return <div className="qty-app">
     <header className="qty-header">
       <div className="qty-brand"><button type="button" className="qty-menu-button" aria-label={tr("Open side menu")} aria-haspopup="dialog" onClick={() => menu.current?.showModal()}><Menu size={22}/></button>
-        <div><strong>IMS TARA MAA</strong><small>{office ? tr("Office inventory") : tr("Workshop stock")}</small></div></div>
+        <div><strong>IMS TARA MAA</strong><small>{readOnly ? tr("Previous History — Read Only") : office ? tr("Office inventory") : tr("Workshop stock")}</small></div></div>
       {data && <div className="qty-account"><span>{data.user.name} · {tr(roleLabel(role))}</span></div>}
     </header>
     <dialog className="qty-menu" ref={menu} aria-labelledby="qty-menu-title" onClick={event => {if(event.target===event.currentTarget)menu.current?.close();}}>
@@ -175,37 +180,38 @@ export default function QuantityWorkspace({office = false}: {office?:boolean}) {
       {shownTabs.filter(([key]) => key!=='staff' && key!=='data').map(([key,label,Icon]) => <button type="button" key={key} aria-current={screen === key ? 'page' : undefined} onClick={() => go(key)}><Icon size={18}/>{label}</button>)}
     </nav>
     <main className="qty-main" aria-busy={loading}>
+      {readOnly && <section className="qty-panel qty-archive-notice" aria-label={tr('Previous History — Read Only')}><h1>{tr('Previous History — Read Only')}</h1><p>{tr('These are archived records. New entries, stock movements and edits belong in current Stock Management.')}</p><div className="qty-quick"><a className="qty-primary" href={office ? '/?view=Office' : '/'}>{tr('Open current Stock Management')}</a><a href={office ? '/?view=Office&action=office_receive' : '/?action=receipt'}>{tr('Open new entry')}</a></div></section>}
       {error && <p className="qty-status bad" role="alert">{tr(error)} <button type="button" onClick={() => void refresh(page, historyCompany)}>{tr("Reload stock")}</button></p>}
       {notice && <p className="qty-status" role="status">{tr(notice)}</p>}
       {!data && !error && <p role="status">{tr("Loading stock…")}</p>}
-      {data && screen === 'artisans' && <ArtisanDashboard data={data} create={async values=>{
+      {data && screen === 'artisans' && <ArtisanDashboard data={data} readOnly={readOnly} create={async values=>{
         const result=await ledgerAction('artisanCreate',values);
         await refresh(page,historyCompany);
         setNotice('Artisan created. The profile and artwork options are updated.');
         return result.id;
       }}/>}
       {data && screen === 'dashboard' && (office
-        ? <OfficeDashboard data={data} company={company} setCompany={setCompany} onAction={go}/>
-        : <Dashboard data={data} company={company} setCompany={id => {setCompany(id);setPage(0);setHistoryCompany(id);}} onAction={go}
+        ? <OfficeDashboard data={data} readOnly={readOnly} company={company} setCompany={setCompany} onAction={go}/>
+        : <Dashboard data={data} readOnly={readOnly} company={company} setCompany={id => {setCompany(id);setPage(0);setHistoryCompany(id);}} onAction={go}
           onSave={async (body,key) => {
             await requestJson('/api/quantity-stock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,kind:'company_profile_edit',key})});
             setNotice('Company profile updated. The new details now appear across the inventory.');
             await refresh(0,String(body.id||''));
           }}/>) }
-      {data && ['receipt','issue','receive','manage','office-move','office-vendor'].includes(screen) && <MovementForm key={screen} screen={screen as MovementScreen}
+      {!readOnly && data && ['receipt','issue','receive','manage','office-move','office-vendor'].includes(screen) && <MovementForm key={screen} screen={screen as MovementScreen}
         data={data} initialCompany={company} save={save} addMaster={addMaster} loading={loading}/>}
       {data && screen === 'history' && <History data={data} page={page} setPage={setPage} company={historyCompany} setCompany={id => {setPage(0);setHistoryCompany(id);}}
-        loading={loading} save={save} office={office}/>}
-      {data && screen === 'staff' && isOwner(role) && <StaffManagement currentUser={data.user.id} request={requestJson} save={values => ledgerAction('user',values)}/>}
-      {data && screen === 'office-catalog' && permitted(role,'officeMaster') && <OfficeCatalog request={requestJson}
+        loading={loading} save={save} office={office} readOnly={readOnly}/>}
+      {!readOnly && data && screen === 'staff' && isOwner(role) && <StaffManagement currentUser={data.user.id} request={requestJson} save={values => ledgerAction('user',values)}/>}
+      {!readOnly && data && screen === 'office-catalog' && permitted(role,'officeMaster') && <OfficeCatalog request={requestJson}
         save={async values=>{await ledgerAction('officeMasterEdit',values);await refresh(page,historyCompany);}}/>}
-      {data && screen === 'data' && permitted(role,'manageData') && <AdminDataControl action={adminAction} busy={adminBusy} canDelete={isOwner(role)}/>}
+      {!readOnly && data && screen === 'data' && permitted(role,'manageData') && <AdminDataControl action={adminAction} busy={adminBusy} canDelete={isOwner(role)}/>}
     </main>
   </div>;
 }
 
-function Dashboard({data, company, setCompany, onAction,onSave}: {
-  data: StockSnapshot; company: string; setCompany: (id: string) => void; onAction: (screen: Screen) => void;onSave:Save;
+function Dashboard({data, company, setCompany, onAction,onSave,readOnly=false}: {
+  data: StockSnapshot; company: string; setCompany: (id: string) => void; onAction: (screen: Screen) => void;onSave:Save;readOnly?:boolean;
 }) {
     const {t:tr}=useInventoryLanguage();
 
@@ -257,19 +263,19 @@ function Dashboard({data, company, setCompany, onAction,onSave}: {
       {selected.contact&&<p><Phone size={15}/> {selected.contact}</p>}
       {selected.address&&<p><MapPin size={15}/> {selected.address}</p>}
       {selected.notes&&<p>{selected.notes}</p>}
-      {permitted(data.user.role,'manageData')&&<button type="button" onClick={()=>setEditing(value=>!value)}><Pencil size={16}/>{tr("Edit company details")}</button>}
-      {editing&&<CompanyEditor key={selected.id} company={selected} save={onSave} close={()=>setEditing(false)}/>}
+      {!readOnly&&permitted(data.user.role,'manageData')&&<button type="button" onClick={()=>setEditing(value=>!value)}><Pencil size={16}/>{tr("Edit company details")}</button>}
+      {!readOnly&&editing&&<CompanyEditor key={selected.id} company={selected} save={onSave} close={()=>setEditing(false)}/>}
     </section>
     <div className="qty-title"><div><h1>{tr("Company Dashboard")}</h1><p>{tr("Stock balances by company and product category.")}</p></div>
       <label className="qty-field compact"><span>{tr("Company")}</span><select value={company} onChange={event => setCompany(event.target.value)}>
         <option value="">{tr("All companies")}</option>{data.companies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label></div>
     <div className="qty-cards">{cards.map(([label,quantity]) => <div key={label}><span>{label}</span><strong>{count(quantity)} <small>{tr("pcs")}</small></strong></div>)}</div>
-    <div className="qty-quick">
+    {!readOnly && <div className="qty-quick">
       {permitted(data.user.role,'receipt') && <button className="qty-primary" onClick={() => onAction('receipt')}><Plus size={17}/>{tr("New Entry")}</button>}
       {permitted(data.user.role,'handoff') && <button onClick={() => onAction('issue')}><ArrowUpRight size={17}/>{tr("Send to artisan")}</button>}
       {permitted(data.user.role,'return') && <button onClick={() => onAction('receive')}><ArrowDownLeft size={17}/>{tr("Receive stock")}</button>}
-    </div>
+    </div>}
     {!rows.length && <p className="qty-empty">{tr("No stock has been recorded for this selection.")}</p>}
     <div className="qty-category-grid">{rows.map(row => {
       const stage = row.stages;
@@ -339,13 +345,13 @@ function CompanyHistory({company,artisan}:{company?:string;artisan?:string}) {
   </section>;
 }
 
-function ArtisanDashboard({data,create}:{data:StockSnapshot;create:(values:Record<string,unknown>)=>Promise<string>}) {
+function ArtisanDashboard({data,create,readOnly=false}:{data:StockSnapshot;create:(values:Record<string,unknown>)=>Promise<string>;readOnly?:boolean}) {
     const {t:tr}=useInventoryLanguage();
 
   const [selected,setSelected]=useState('');
   const [creating,setCreating]=useState(false);
-  const creator=<>{permitted(data.user.role,'masterCreate')&&<button type="button" className="qty-primary" onClick={()=>setCreating(true)}><Plus size={17}/>{tr("Create artisan")}</button>}
-    {creating&&<ArtisanCreator artisans={data.artisans} create={create} close={()=>setCreating(false)} onCreated={id=>{setSelected(id);setCreating(false);}}/>}</>;
+  const creator=<>{!readOnly&&permitted(data.user.role,'masterCreate')&&<button type="button" className="qty-primary" onClick={()=>setCreating(true)}><Plus size={17}/>{tr("Create artisan")}</button>}
+    {!readOnly&&creating&&<ArtisanCreator artisans={data.artisans} create={create} close={()=>setCreating(false)} onCreated={id=>{setSelected(id);setCreating(false);}}/>}</>;
   const artisan=data.artisans.find(row=>row.id===selected);
   const balance=data.balances.filter(row=>row.artisan_id===selected&&row.quantity>0);
   if (!artisan) return <><div className="qty-title"><div><h1>{tr("Artisan Dashboard")}</h1><p>{tr("Open an artisan profile to review outstanding stock and movements.")}</p></div></div>{creator}
@@ -400,8 +406,8 @@ function ArtisanCreator({artisans,create,close,onCreated}:{
   </fieldset></form>;
 }
 
-function OfficeDashboard({data,company,setCompany,onAction}: {
-  data: StockSnapshot; company: string; setCompany: (id:string) => void; onAction: (screen:Screen) => void;
+function OfficeDashboard({data,company,setCompany,onAction,readOnly=false}: {
+  data: StockSnapshot; company: string; setCompany: (id:string) => void; onAction: (screen:Screen) => void;readOnly?:boolean;
 }) {
     const {t:tr}=useInventoryLanguage();
 
@@ -420,10 +426,10 @@ function OfficeDashboard({data,company,setCompany,onAction}: {
         <option value="">{tr("All companies")}</option>{data.companies.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label></div>
     <div className="qty-cards">{stages.map(stage=><div key={stage}><span>{tr(stageLabels[stage])}</span><strong>{count(balances.filter(row=>row.stage===stage).reduce((sum,row)=>sum+row.quantity,0))} <small>{tr("pcs")}</small></strong></div>)}</div>
-    <div className="qty-quick">
+    {!readOnly && <div className="qty-quick">
       <button type="button" className="qty-primary" onClick={()=>onAction('office-move')}><ArrowDownLeft size={17}/>{tr("Office Movements")}</button>
       {permitted(data.user.role,'officeEntry') && <button type="button" onClick={()=>onAction('office-vendor')}><Plus size={17}/>{tr("Office New Entry")}</button>}
-    </div>
+    </div>}
     {!groups.size && <p className="qty-empty">{tr("No stock has been sent to Office for this selection.")}</p>}
     <div className="qty-category-grid">{Array.from(groups.entries()).map(([id,row])=><section className="qty-category" key={id}>
       <header><div><small>{name(data.companies,row.companyId)}</small><h2>{name(data.products,row.productId)}</h2></div></header>
@@ -595,9 +601,9 @@ function MovementForm({screen,data,initialCompany,save,addMaster,loading}: {
   </div>;
 }
 
-function History({data,page,setPage,company,setCompany,loading,save,office}: {
+function History({data,page,setPage,company,setCompany,loading,save,office,readOnly=false}: {
   data: StockSnapshot; page: number; setPage: (page: number) => void; company: string; setCompany: (id: string) => void;
-  loading: boolean; save: Save; office: boolean;
+  loading: boolean; save: Save; office: boolean;readOnly?:boolean;
 }) {
     const {t:tr}=useInventoryLanguage();
 
@@ -609,7 +615,7 @@ function History({data,page,setPage,company,setCompany,loading,save,office}: {
   const pending = useRef(false);
   const key = useRef('');
   const date = (value: string) => new Date(value).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kolkata'});
-  const eligible = (row: StockHistory) => row.kind === 'issue' && editUntil(row) > Date.now() && permitted(data.user.role,'handoff')
+  const eligible = (row: StockHistory) => !readOnly && row.kind === 'issue' && editUntil(row) > Date.now() && permitted(data.user.role,'handoff')
     && (isManagement(data.user.role) || data.user.role==='Supervisor' || row.actor_id === data.user.id);
   const delta = editing ? Number(quantity) - editing.quantity : 0;
   const raw = editing ? stockAvailable(data.balances,editing.company_id,editing.product_id,'raw',null) : 0;
@@ -633,7 +639,7 @@ function History({data,page,setPage,company,setCompany,loading,save,office}: {
     }
   }
   return <>
-    <div className="qty-title"><div><h1>{office ? tr("Office History") : tr("Stock History")}</h1><p>{office ? tr("Receipts, sales and returns with the name of the staff member who saved each entry.") : tr("Handoff quantities are editable for seven days.")}</p></div>
+    <div className="qty-title"><div><h1>{office ? tr("Office History") : tr("Stock History")}</h1><p>{readOnly ? tr('Previous History — Read Only') : office ? tr("Receipts, sales and returns with the name of the staff member who saved each entry.") : tr("Handoff quantities are editable for seven days.")}</p></div>
       <label className="qty-field compact"><span>{tr("Company")}</span><select disabled={loading || saving || !!officeEdit} value={company} onChange={event => {setEditing(null);setCompany(event.target.value);}}>
         <option value="">{tr("All companies")}</option>{data.companies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label></div>
@@ -645,7 +651,7 @@ function History({data,page,setPage,company,setCompany,loading,save,office}: {
           <small>{date(row.created_at)} · {row.actor}{row.actor_role ? (' · ' + tr(row.actor_role)) : ''}{row.preferred_work ? (tr(" · Preferred work: ") + row.preferred_work) : ''}{row.reference ? (tr(" · Bill ") + row.reference) : ''}{row.received_on ? (tr(" · Arrival ") + row.received_on) : ''}</small>
           {row.kind !== 'legacy' && row.notes && <small>{row.notes}</small>}</div>
           <div><b>{row.kind === 'issue_edit' ? (row.previous_quantity) + " → " + (row.new_quantity) : count(row.quantity)}  {tr("pcs")}</b>
-            {office && row.kind==='office_vendor_receipt' && permitted(data.user.role,'officeEdit')
+            {!readOnly && office && row.kind==='office_vendor_receipt' && permitted(data.user.role,'officeEdit')
               && canEditOfficeEntry(data.user.role,row.created_at) && <button type="button" disabled={loading||!!officeEdit} onClick={()=>setOfficeEdit(row)}>{tr("Edit receipt details")}</button>}
             {eligible(row) && <button type="button" disabled={saving || loading} onClick={() => {setEditing(row);setQuantity(String(row.quantity));setError('');key.current='';}}>{tr("Edit quantity")}</button>}</div></div>
         {officeEdit?.id===row.id && <OfficeReceiptEditor row={officeEdit} save={save} close={()=>setOfficeEdit(null)}/>}

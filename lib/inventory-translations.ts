@@ -40,6 +40,14 @@ export const legacyBengali:Record<string,string>={
 'Updated':'বদলানো হয়েছে'
 };
 export const inventoryBengali:Record<string,string>={
+"Previous History (read only)":"পুরনো হিসেব (শুধু দেখুন)",
+"Previous History — Read Only":"পুরনো হিসেব — শুধু দেখার জন্য",
+"These are archived records. New entries, stock movements and edits belong in current Stock Management.":"এগুলি পুরনো সংরক্ষিত হিসেব। নতুন এন্ট্রি, মাল দেওয়া-নেওয়া ও সংশোধনের জন্য বর্তমান স্টক ম্যানেজমেন্ট খুলুন।",
+"Open current Stock Management":"বর্তমান স্টক ম্যানেজমেন্ট খুলুন",
+"Open new entry":"নতুন মাল গ্রহণের ফর্ম খুলুন",
+"Previous history is read-only. Open current Stock Management for new entries.":"পুরনো হিসেব শুধু দেখা যাবে। নতুন এন্ট্রির জন্য বর্তমান স্টক ম্যানেজমেন্ট খুলুন।",
+"Use the new Stock Management screens. Previous history is read-only.":"বর্তমান স্টক ম্যানেজমেন্টে নতুন এন্ট্রি করুন। আগের হিসেব শুধু দেখা যাবে।",
+
 "Check the previous save before starting another receipt.":"নতুন জমা শুরু করার আগে আগের সেভ সম্পূর্ণ হয়েছে কি না যাচাই করুন।",
 "Check / retry previous save":"আগের সেভ যাচাই / আবার চেষ্টা করুন",
 "Select artisan first":"প্রথমে কারিগর বাছুন",

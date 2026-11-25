@@ -16,5 +16,5 @@ export default async function Page({searchParams}: {searchParams: Promise<{view?
   </main>;
 
   const office = isOfficeRole(staff.role) || (isManagement(staff.role) && (await searchParams).view === "Office");
-  return <QuantityWorkspace office={office}/>;
+  return <QuantityWorkspace office={office} readOnly/>;
 }
