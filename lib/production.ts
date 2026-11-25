@@ -25,6 +25,7 @@ export type Line = {
     artwork?: string;
     preferred?: string;
     outcome?: 'ready' | 'hold' | 'raw';
+    disputeQuantity?: number;
     pool?: 'normal' | 'company_return';
     artisan?: string;
     adjustment?: 'shortage' | 'surplus';
@@ -159,6 +160,19 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
             case 'receive':
             case 'return_receive':
                 a = source(l, ['artist', 'reprint'], c.kind === 'receive' ? 'normal' : 'company_return');
+                if (l.disputeQuantity !== undefined) {
+                    const disputed = l.disputeQuantity;
+                    if (c.kind !== 'receive' || l.outcome === 'hold' || !Number.isSafeInteger(disputed) || disputed < 0 || disputed > n)
+                        throw new Error('Dispute quantity must be a whole number within the received quantity.');
+                    // One physical account per piece: repaint is also shown in the
+                    // Factory Dispute view, never duplicated into a hold balance.
+                    add(a, -n);
+                    if (n > disputed)
+                        add({ ...a, stage: 'ready', artisan: '', work: '', arts: normalizeArts(a.arts + ' + ' + a.work) }, n - disputed);
+                    if (disputed)
+                        add({ ...a, stage: 'reprint' }, disputed);
+                    break;
+                }
                 move(a, { ...a, stage: l.outcome === 'hold' ? 'hold' : 'ready', artisan: '', work: '', arts: l.outcome === 'hold' ? a.arts : normalizeArts(a.arts + ' + ' + a.work) }, n);
                 break;
             case 'dispute':

@@ -21,6 +21,25 @@ try{await sql.begin(async tx=>{
  const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});const account=(stage,arts='',work='',artisan='',pool='normal',co=company)=>({company:co,product,pool,stage,arts,work,artisan});
  const send=async(c,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/production',{method:'POST',headers:{'Content-Type':'application/json',origin:'https://im.tarafabbs.com'},body:JSON.stringify({date,...c,key})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const q=async a=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(a)}`)[0]?.quantity||0);
+ if(process.env.IMS_TEST_RECEIVE_ONLY==='1'){
+  await send({kind:'receipt',company,lines:[{company,product,quantity:100}]});
+  await send({kind:'issue',company,lines:[{source:account('raw'),quantity:50,artisan:artist,artwork:'Free Hand Paint'}]});
+  const command={kind:'receive',company,lines:[{source:account('artist','','Free Hand Paint',artist),quantity:20,disputeQuantity:3}]},key=randomUUID();
+  const received=await send(command,200,key);await send(command,200,key);
+  assert.equal(await q(account('raw')),50);assert.equal(await q(account('artist','','Free Hand Paint',artist)),30);
+  assert.equal(await q(account('ready','Free Hand Paint')),17);assert.equal(await q(account('reprint','','Free Hand Paint',artist)),3);
+  const corrected=await send({kind:'correct',document:received.id,notes:'Correct received count',lines:[{...command.lines[0],quantity:18}]});
+  assert.equal(await q(account('artist','','Free Hand Paint',artist)),32);assert.equal(await q(account('ready','Free Hand Paint')),15);
+  await send({kind:'receive',company,lines:[{source:account('reprint','','Free Hand Paint',artist),quantity:3,disputeQuantity:1}]});
+  assert.equal(await q(account('reprint','','Free Hand Paint',artist)),1);assert.equal(await q(account('ready','Free Hand Paint')),17);
+  await send({kind:'receive',company,lines:[{...command.lines[0],quantity:5,disputeQuantity:6}]},400);
+  await send({kind:'receive',company,lines:[{...command.lines[0],quantity:40,disputeQuantity:0}]},400);
+  assert.equal(await q(account('artist','','Free Hand Paint',artist)),32);
+  const snap=await GET(new Request('https://im.tarafabbs.com/api/production'));const body=await snap.json();
+  assert.equal(body.balances.filter(b=>b.company===company).reduce((s,b)=>s+b.quantity,0),100);
+  globalThis.__identity={signedIn:true,staff:{...owner,role:'Viewer'}};await send(command,403);
+  console.log('PASS: API/PostgreSQL receipt split, atomic correction, repaint, idempotent retry, bounds, unchanged raw, conservation and permissions. All fixtures rolled back.');throw Error('ROLLBACK_TEST');
+ }
  if(process.env.IMS_TEST_OFFICE_ONLY==='1'){
   const vendor=randomUUID(),officeProduct=randomUUID();await tx`insert into inventory.companies(id,name,prefix,ownership,office_only) values(${vendor},'Test Vendor','TV','EXTERNAL',1)`;await tx`insert into inventory.products(id,name,office_only) values(${officeProduct},'Test Office Product',1)`;
   await tx`update inventory.users set role='Office Manager' where id=${owner.id}`;globalThis.__identity={signedIn:true,staff:{...owner,role:'Office Manager'}};

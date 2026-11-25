@@ -40,6 +40,27 @@ export const legacyBengali:Record<string,string>={
 'Updated':'বদলানো হয়েছে'
 };
 export const inventoryBengali:Record<string,string>={
+"Select artisan first":"প্রথমে কারিগর বাছুন",
+"pcs pending":"পিস বাকি",
+"Choose an artisan to see their companies, categories and pending quantities.":"কারিগর বাছলে তাঁর কাছে থাকা কোম্পানি, ক্যাটাগরি ও বাকি মালের হিসেব দেখাবে।",
+"Total pending with artisan":"কারিগরের কাছে মোট বাকি",
+"No pending production stock. Entry is disabled. Receive company-return repairs from Company Return.":"এই কারিগরের কাছে মূল উৎপাদনের মাল বাকি নেই। এন্ট্রি করা যাবে না। কোম্পানি থেকে ফেরতের মেরামতি Company Return থেকে জমা নিন।",
+"Category-wise receipt":"ক্যাটাগরি অনুযায়ী জমা নিন",
+"Enter received quantities only. Leave other categories at zero. Different artworks stay separate.":"যত পিস জমা নিচ্ছেন শুধু সেটি লিখুন। বাকি ঘরে শূন্য রাখুন। আলাদা শিল্পকাজের হিসেব আলাদা থাকবে।",
+"Quantity received":"জমা নেওয়া পরিমাণ",
+"Still with artisan before repaint:":"রিপেইন্ট ফেরত দেওয়ার আগে কারিগরের কাছে বাকি:",
+"Dispute — return part of this receipt to the same artisan for repaint":"সমস্যা আছে — এই জমার কিছু মাল একই কারিগরকে রিপেইন্টে ফেরত দিন",
+"Disputed pieces go directly to artisan repaint and appear in Factory Disputes. They do not enter Ready to Dispatch or Company Return.":"সমস্যাযুক্ত মাল সরাসরি এই কারিগরের রিপেইন্টে যাবে ও কারখানার সমস্যাযুক্ত মালের হিসাবে দেখাবে। তৈরি মাল বা কোম্পানি থেকে ফেরতের স্টকে উঠবে না।",
+"Dispute quantity":"সমস্যাযুক্ত পরিমাণ",
+"Repaint pending":"রিপেইন্ট বাকি",
+"All filled quantities save together. No Add line step is needed.":"সব লেখা পরিমাণ একসঙ্গে সেভ হবে। আলাদা করে লাইন যোগ করতে হবে না।",
+"Save Receive from Artist":"কারিগরের জমা সেভ করুন",
+"Factory Disputes":"কারখানার সমস্যাযুক্ত মাল",
+"Includes factory hold and repaint pending with artisans. Artisan repaint is shown here for tracking and counted only once in total stock.":"কারখানায় আটকে থাকা ও কারিগরের কাছে রিপেইন্টের মাল এখানে দেখাবে। একই মাল মোট স্টকে একবারই গোনা হবে।",
+"This artisan has no pending production stock for this company.":"এই কোম্পানির উৎপাদনের কোনো মাল এই কারিগরের কাছে বাকি নেই।",
+"Enter the quantity received for at least one category.":"অন্তত একটি ক্যাটাগরির জমা নেওয়া পরিমাণ লিখুন।",
+"Dispute quantity must be a whole number within the received quantity.":"সমস্যাযুক্ত পরিমাণ পূর্ণ সংখ্যা হতে হবে এবং জমা নেওয়া পরিমাণের বেশি হতে পারবে না।",
+
 'GST NO':'জিএসটি নম্বর','PAN NO':'প্যান নম্বর','AADHAAR NO':'আধার নম্বর',
 'English':'English','Language':'ভাষা','Choose language':'ভাষা বেছে নিন','Home':'হোম','Companies':'কোম্পানি','Artisans':'কারিগর','Company Return':'কোম্পানি থেকে ফেরত','Dispatch Done':'পাঠানো মাল','History':'ইতিহাস','Opening Balance':'শুরুর হিসেব','Stock Check':'স্টক মেলান','Staff Access':'কর্মীদের অ্যাক্সেস','Owner Data Control':'মালিকের ডেটা নিয়ন্ত্রণ','Stock Management':'স্টক ব্যবস্থাপনা','Stock Movement':'মাল দেওয়া-নেওয়া','Manage Profiles':'প্রোফাইল পরিচালনা','Previous History / Data Control':'আগের ইতিহাস / ডেটা নিয়ন্ত্রণ','Workshop Stock':'কারখানার স্টক','Office Inventory':'অফিসের স্টক','Workshop Inventory':'কারখানার স্টক','Fix Issues ·':'সমস্যা দেখুন ·','Open menu':'মেনু খুলুন','Main navigation':'প্রধান মেনু','Mobile navigation':'মোবাইল মেনু','Search companies, artists or stock':'কোম্পানি, কারিগর বা স্টক খুঁজুন','Search…':'খুঁজুন…',
 'Physically in factory / office':'কারখানা / অফিসে হাতে আছে','With artists':'কারিগরের কাছে','With artisans':'কারিগরের কাছে','Total in our custody':'আমাদের দায়িত্বে মোট মাল','Total in custody':'আমাদের দায়িত্বে মোট মাল','Ready to Dispatch':'কোম্পানিকে পাঠানোর জন্য তৈরি','In factory':'কারখানায় আছে','With company':'কোম্পানির কাছে আছে','Main Production':'মূল উৎপাদনের স্টক','Company Return — Separate Stock':'কোম্পানি থেকে ফেরত — আলাদা স্টক','View Dispatches':'পাঠানো মাল দেখুন','Company-wise bills, date, product quantities and optional GST bill number.':'কোম্পানি অনুযায়ী বিল, তারিখ ও পণ্যের পরিমাণ দেখুন। জিএসটি বিল নম্বর দেওয়া ঐচ্ছিক।','Company totals only. No bill matching. This stock never mixes with internal reprint.':'কোম্পানির মোট পরিমাণ অনুযায়ী হিসেব হবে। বিল মেলাতে হবে না। এই স্টক কারখানার নিজস্ব রিপ্রিন্টের সঙ্গে মিশবে না।',

@@ -18,7 +18,7 @@ export async function GET(request: Request) {
         if(q.get('mode')==='artist') {
             if(office)return Response.json({error:'Workshop access required.'},{status:403});
             const totals=await db.prepare(`SELECT
-              coalesce(sum(CASE WHEN e.effective_kind IN ('issue','additional','reprint','return_send','opening') AND (d->>'quantity')::int>0 THEN (d->>'quantity')::int ELSE 0 END),0)::float8 AS given,
+              coalesce(sum(CASE WHEN e.effective_kind IN ('issue','additional','reprint','return_send','opening','receive') AND (d->>'quantity')::int>0 THEN (d->>'quantity')::int ELSE 0 END),0)::float8 AS given,
               coalesce(sum(CASE WHEN e.effective_kind IN ('receive','return_receive') AND (d->>'quantity')::int<0 THEN -(d->>'quantity')::int ELSE 0 END),0)::float8 AS received,
               max(e.event_date)::text AS last_activity
               FROM inventory.production_effective_events e CROSS JOIN LATERAL jsonb_array_elements(e.delta) d
@@ -36,7 +36,8 @@ export async function GET(request: Request) {
     sum(CASE WHEN effective_kind='payment' THEN coalesce((payload->>'amount')::numeric,0) ELSE 0 END)::float8 AS paid FROM entries GROUP BY event_date),
    payments AS (SELECT event_date,event_date-lag(event_date) OVER(ORDER BY event_date,created_at) AS gap FROM entries WHERE effective_kind='payment')
    SELECT coalesce((SELECT jsonb_agg(g) FROM grouped g),'[]') AS actions,coalesce((SELECT jsonb_agg(d ORDER BY d.date) FROM days d),'[]') AS days,
-   (SELECT count(*)::int FROM payments) AS payment_count,(SELECT round(avg(gap)::numeric,1)::float8 FROM payments) AS average_payment_gap
+   (SELECT count(*)::int FROM payments) AS payment_count,(SELECT round(avg(gap)::numeric,1)::float8 FROM payments) AS average_payment_gap,
+   coalesce((SELECT sum((l->>'disputeQuantity')::int) FROM entries e CROSS JOIN LATERAL jsonb_array_elements(coalesce(e.payload->'lines','[]')) l WHERE e.effective_kind='receive'),0)::float8 AS receipt_repaint
   `).bind(company, company).first();
             return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
         }

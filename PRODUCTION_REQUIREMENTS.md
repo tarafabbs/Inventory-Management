@@ -8,6 +8,8 @@ Approved 25 November 2026. This document supersedes piece-code, challan-matched 
 - Completed artwork combinations identify ready stock; no handwritten identifiers.
 - Raw → artist → ready; ready → another artist for further art; count the physical item once.
 - Internal disputes and reprint never become Company Return inventory.
+- Artisan receipt starts with artisan selection. Only their positive pending production accounts and companies are eligible; no-stock artisans cannot enter a receipt. Category/work quantities post together without adding lines.
+- A receipt can split quantity between Ready and same-artisan repaint. Disputed quantity must be a whole number within that receipt. Repaint is shown in Factory Disputes and artist pending using the same physical account; never duplicate it into factory hold or Company Return. Legacy hold receipts retain their historical meaning.
 - Company Return uses a separate pool: receive from aggregate company-held stock → repair artist → ready → dispatch. No bill allocation.
 - Raw rejected goods returned to source are separate from finished dispatch and cannot create finished-return eligibility.
 - Total damage leaves usable custody; a separate damage document tracks replacement/settlement.
