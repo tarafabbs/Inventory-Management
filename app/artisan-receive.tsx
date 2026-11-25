@@ -19,6 +19,7 @@ export default function ArtisanReceive({ data, busy, save }: {
     const [error, setError] = useState('');
     const [hydrated, setHydrated] = useState(false);
     const [restored, setRestored] = useState(false);
+    const [retryCommand, setRetryCommand] = useState<Command | null>(null);
     const key = useRef('');
     const pending = useRef(false);
     const storage = 'ims-artisan-receive-v2:' + data.user.id;
@@ -28,16 +29,18 @@ export default function ArtisanReceive({ data, busy, save }: {
             if (saved?.draft?.artisan) {
                 setDraft({ ...empty(), ...saved.draft });
                 key.current = saved.key || '';
+                if (saved.key && saved.command?.kind === 'receive') setRetryCommand(saved.command);
                 setRestored(true);
             }
         } catch { /* A blocked storage API does not prevent stock entry. */ }
         setHydrated(true);
     }, [storage]);
     useEffect(() => {
-        if (hydrated) try { sessionStorage.setItem(storage, JSON.stringify({ draft, key: key.current })); } catch { /* Optional draft storage. */ }
-    }, [draft, storage, hydrated]);
+        if (hydrated) try { sessionStorage.setItem(storage, JSON.stringify({ draft, key: key.current, command: retryCommand })); } catch { /* Optional draft storage. */ }
+    }, [draft, storage, hydrated, retryCommand]);
     const change = (patch: Partial<ArtisanReceiptDraft>) => {
         key.current = '';
+        setRetryCommand(null);
         setDraft(d => ({ ...d, ...patch }));
         setError('');
     };
@@ -50,18 +53,23 @@ export default function ArtisanReceive({ data, busy, save }: {
     const companyName = (id: string) => data.companies.find(c => c.id === id)?.name || id;
     const productName = (id: string) => data.products.find(p => p.id === id)?.name || id;
 
-    async function submit(e: FormEvent) {
-        e.preventDefault();
+    async function submit(e?: FormEvent) {
+        e?.preventDefault();
         if (pending.current || busy) return;
         setError('');
         try {
-            const command = artisanReceiptCommand(draft, data.balances);
+            // Recheck an uncertain save with its exact original payload/key even
+            // if a reload now shows depleted stock. The API resolves idempotency
+            // before posting or validating current balances.
+            const command = retryCommand || artisanReceiptCommand(draft, data.balances);
             key.current ||= crypto.randomUUID();
-            try { sessionStorage.setItem(storage, JSON.stringify({ draft, key: key.current })); } catch { /* Optional. */ }
+            setRetryCommand(command);
+            try { sessionStorage.setItem(storage, JSON.stringify({ draft, key: key.current, command })); } catch { /* Optional. */ }
             pending.current = true;
             await save(command, key.current);
             setDraft(empty());
             setRestored(false);
+            setRetryCommand(null);
             key.current = '';
             try { sessionStorage.removeItem(storage); } catch { /* Optional. */ }
         } catch (e) {
@@ -72,6 +80,7 @@ export default function ArtisanReceive({ data, busy, save }: {
     return <form className="prod-form artisan-receive" onSubmit={submit}>
         <fieldset disabled={busy}>
             {restored && <p>{tr('Unsaved draft restored.')}</p>}
+            {retryCommand && <p className="prod-preview">{tr('Check the previous save before starting another receipt.')} <button type="button" onClick={() => void submit()}>{tr('Check / retry previous save')}</button></p>}
             <label>{tr('Select artisan first')}<select required value={draft.artisan} onChange={e => change({ ...empty(), artisan: e.target.value })}>
                 <option value="">{tr('Select artist')}</option>
                 {data.artisans.map(a => <option key={a.id} value={a.id}>{a.name} · {total(artisanPending(data.balances, a.id))} {tr('pcs pending')}</option>)}

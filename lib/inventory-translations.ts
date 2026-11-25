@@ -40,6 +40,8 @@ export const legacyBengali:Record<string,string>={
 'Updated':'বদলানো হয়েছে'
 };
 export const inventoryBengali:Record<string,string>={
+"Check the previous save before starting another receipt.":"নতুন জমা শুরু করার আগে আগের সেভ সম্পূর্ণ হয়েছে কি না যাচাই করুন।",
+"Check / retry previous save":"আগের সেভ যাচাই / আবার চেষ্টা করুন",
 "Select artisan first":"প্রথমে কারিগর বাছুন",
 "pcs pending":"পিস বাকি",
 "Choose an artisan to see their companies, categories and pending quantities.":"কারিগর বাছলে তাঁর কাছে থাকা কোম্পানি, ক্যাটাগরি ও বাকি মালের হিসেব দেখাবে।",
