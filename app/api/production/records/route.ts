@@ -21,7 +21,7 @@ export async function GET(request: Request) {
               coalesce(sum(CASE WHEN e.effective_kind IN ('issue','additional','reprint','return_send','opening','receive') AND (d->>'quantity')::int>0 THEN (d->>'quantity')::int ELSE 0 END),0)::float8 AS given,
               coalesce(sum(CASE WHEN e.effective_kind IN ('receive','return_receive') AND (d->>'quantity')::int<0 THEN -(d->>'quantity')::int ELSE 0 END),0)::float8 AS received,
               max(e.event_date)::text AS last_activity
-              FROM inventory.production_effective_events e CROSS JOIN LATERAL jsonb_array_elements(e.delta) d
+              FROM inventory.production_effective_events e CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN e.kind='correct' THEN coalesce(e.payload->'effectiveDelta',e.delta) ELSE e.delta END) d
               WHERE d->>'artisan'=? AND d->>'stage' IN ('artist','reprint')
             `).bind(artisan).first();return Response.json(totals,{headers:{'Cache-Control':'no-store'}});
         }
