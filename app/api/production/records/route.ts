@@ -15,6 +15,20 @@ export async function GET(request: Request) {
             throw Error('Invalid date.');
         const office = isOfficeRole(staff.role);
         const scope = office ? "AND (e.kind IN ('office_send','office_receive','office_sell','office_return','office_vendor','vendor_return') OR e.kind='correct' AND e.payload->>'correctionKind'='office_vendor')" : '';
+        if(q.get('mode')==='preferences') {
+            if(office)return Response.json({error:'Workshop access required.'},{status:403});
+            const product=q.get('product')||'';
+            if(!company||!product)throw Error('Choose company and category.');
+            // Raw stock is pooled. These are receipt references, never an allocation
+            // or a claim about how many pieces remain for an individual preference.
+            const result=await db.prepare(`SELECT coalesce(array_agg(DISTINCT trim(l->>'preferred') ORDER BY trim(l->>'preferred')),array[]::text[]) AS artworks
+              FROM inventory.production_effective_events e CROSS JOIN LATERAL jsonb_array_elements(coalesce(e.payload->'lines','[]')) l
+              WHERE e.effective_kind='receipt' AND (e.company=? OR e.delta @> ?::text::jsonb)
+              AND coalesce(nullif(l->>'company',''),e.company)=? AND l->>'product'=? AND trim(coalesce(l->>'preferred',''))<>''
+              AND e.created_at>coalesce((SELECT max(r.created_at) FROM inventory.production_events r WHERE r.kind='reset' AND NOT EXISTS(SELECT 1 FROM inventory.production_events u WHERE u.kind='undo_reset' AND u.payload->>'document'=r.id::text)),'-infinity'::timestamptz)
+            `).bind(company,JSON.stringify([{company}]),company,product).first(12_000);
+            return Response.json(result||{artworks:[]},{headers:{'Cache-Control':'no-store'}});
+        }
         if(q.get('mode')==='artist') {
             if(office)return Response.json({error:'Workshop access required.'},{status:403});
             const totals=await db.prepare(`SELECT

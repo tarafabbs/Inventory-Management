@@ -1,5 +1,13 @@
 // Reused terminology only. Rendering uses React; no DOM mutation or external translation service.
 export const legacyBengali:Record<string,string>={
+'Office profile access required.':'অফিসের প্রোফাইল তৈরির অনুমতি প্রয়োজন।',
+'Take action':'ব্যবস্থা নিন',
+'Return raw dispute to company · Bill & Dispatch':'কাঁচা মালের সমস্যা: বিল করে কোম্পানিকে ফেরত দিন',
+'Preferred artwork:':'পছন্দের শিল্পকাজ:',
+'No preference recorded':'কোনও পছন্দ দেওয়া হয়নি',
+'Receipt preferences are a reference for this company/category. You can choose a different actual artwork.':'এই কোম্পানি ও ক্যাটাগরির মাল আসার সময় দেওয়া পছন্দ দেখানো হচ্ছে। কাজ দেওয়ার সময় অন্য শিল্পকাজও বেছে নিতে পারেন।',
+'Could not load preferred artwork. You can still choose the actual artwork.':'পছন্দের শিল্পকাজ লোড হয়নি। তবুও যে কাজ হবে তা বেছে নিতে পারবেন।',
+
 'Profile list':'প্রোফাইলের তালিকা',
 'Current profiles':'বর্তমান প্রোফাইল',
 'All profiles (including history)':'সব প্রোফাইল (পুরোনো সহ)',

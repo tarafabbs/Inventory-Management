@@ -16,6 +16,8 @@ export async function POST(request: Request) {
             throw Error('Choose profile type.');
         if (!permitted(u.role, v.id ? 'master' : 'masterCreate') && !(isOfficeRole(u.role) && permitted(u.role, 'officeMaster')))
             return Response.json({ error: 'Access denied.' }, { status: 403 });
+        if(v.view==='office'&&!isManagement(u.role)&&!isOfficeRole(u.role))return Response.json({error:'Office profile access required.'},{status:403});
+        const officeCreation=isOfficeRole(u.role)||v.view==='office';
         const name = String(v.name || '').trim(), contact = String(v.contact || '').trim(), address = String(v.address || '').trim(), notes = String(v.notes || '').trim();
         if (!name || name.length > 120 || contact.length > 200 || address.length > 1000 || notes.length > 2000)
             throw Error('Check the profile details and field lengths.');
@@ -68,16 +70,16 @@ export async function POST(request: Request) {
                     await tx.prepare('UPDATE companies SET name=?,contact=?,address=?,notes=? WHERE id=?').bind(name, contact, address, notes, id).run();
                 }
                 else {
-                    const ownership = isOfficeRole(u.role) ? 'EXTERNAL' : v.ownership || 'EXTERNAL';
+                    const ownership = officeCreation ? 'EXTERNAL' : v.ownership || 'EXTERNAL';
                     if (!['OWN', 'EXTERNAL'].includes(ownership))
                         throw Error('Choose ownership.');
-                    await tx.prepare('INSERT INTO companies(id,name,prefix,ownership,contact,address,notes,office_only) VALUES(?,?,?,?,?,?,?,?)').bind(id, name, id.replaceAll('-', '').slice(0, 8).toUpperCase(), ownership, contact, address, notes, isOfficeRole(u.role) ? 1 : 0).run();
+                    await tx.prepare('INSERT INTO companies(id,name,prefix,ownership,contact,address,notes,office_only) VALUES(?,?,?,?,?,?,?,?)').bind(id, name, id.replaceAll('-', '').slice(0, 8).toUpperCase(), ownership, contact, address, notes, officeCreation ? 1 : 0).run();
                 }
             }
             else if (old)
                 await tx.prepare('UPDATE products SET name=? WHERE id=?').bind(name, id).run();
             else
-                await tx.prepare('INSERT INTO products(id,name,office_only) VALUES(?,?,?)').bind(id, name, isOfficeRole(u.role) ? 1 : 0).run();
+                await tx.prepare('INSERT INTO products(id,name,office_only) VALUES(?,?,?)').bind(id, name, officeCreation ? 1 : 0).run();
             await tx.prepare('INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label,before_data,after_data) VALUES(?,?,?,?,?,?::text::jsonb,?::text::jsonb)').bind(u.id, u.name, roleLabel(u.role), 'production_profile_' + (old ? 'updated' : 'created'), name, JSON.stringify(old ? Object.fromEntries(Object.entries(old).filter(([k]) => !['gst_no', 'pan_no', 'aadhaar_no'].includes(k))) : null), JSON.stringify({ id, name, contact, address, notes })).run();
             const result = { ok: true, id };
             await tx.prepare('INSERT INTO inventory.production_requests(id,actor_id,fingerprint,result) VALUES(?,?,?,?::text::jsonb)').bind(v.key, u.id, hash, JSON.stringify(result)).run();

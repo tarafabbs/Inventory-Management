@@ -73,3 +73,8 @@ Approved 25 November 2026. This document supersedes piece-code, challan-matched 
 - Company and artisan profiles support Active, Paused, Archived and Deleted (history kept). Only Owner can change status or restore; a reason and actor audit are retained.
 - Delete retains the same master ID, all history, stock, money and statement links. Current lists show Active/Paused; filters expose Archived/Deleted and all historical profiles.
 - Inactive companies cannot receive new intake/opening/replacement-order stock. Inactive artisans cannot receive new work assignments. Existing returns, receipts (including immediate repaint), dispatch and financial settlement remain available; balances are never removed by profile status changes.
+
+## Daily workflow shortcuts
+- Companies list includes permitted Create Company and direct Statement/PDF links, with the existing search and lifecycle filters.
+- Factory Dispute stock offers permitted actions by location: held stock can go to reprint or total damage; unworked raw hold can be returned through Bill & Dispatch; artist repaint stock opens Receive with its artisan/company selected. Forms start from the selected account, preserve separate drafts, and never post merely by opening an action.
+- Artist send forms offer Create Artisan, omit Create Company and Find source stock. Raw stock selection shows effective receipt preferences as optional company/category references; pooled stock does not claim remaining quantities per preference, and actual artwork remains freely selectable.

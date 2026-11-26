@@ -9,20 +9,22 @@ const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kol
 const empty = (): ArtisanReceiptDraft => ({ artisan: '', company: '', date: today(), quantities: {}, disputed: false, disputes: {}, notes: '', amount: 0, reference: '' });
 const total = (rows: { quantity: number }[]) => rows.reduce((s, b) => s + b.quantity, 0);
 
-export default function ArtisanReceive({ data, busy, save }: {
+export default function ArtisanReceive({ data, busy, save, initialArtisan='', initialCompany='' }: {
     data: Snapshot;
     busy: boolean;
+    initialArtisan?:string;
+    initialCompany?:string;
     save: (command: Command, key: string) => Promise<unknown>;
 }) {
     const { t: tr } = useInventoryLanguage();
-    const [draft, setDraft] = useState<ArtisanReceiptDraft>(empty);
+    const [draft, setDraft] = useState<ArtisanReceiptDraft>(()=>({...empty(),artisan:initialArtisan,company:initialCompany}));
     const [error, setError] = useState('');
     const [hydrated, setHydrated] = useState(false);
     const [restored, setRestored] = useState(false);
     const [retryCommand, setRetryCommand] = useState<Command | null>(null);
     const key = useRef('');
     const pending = useRef(false);
-    const storage = 'ims-artisan-receive-v2:' + data.user.id;
+    const storage = 'ims-artisan-receive-v2:' + data.user.id+(initialArtisan?':stock:'+JSON.stringify([initialArtisan,initialCompany]):'');
     useEffect(() => {
         try {
             const saved = JSON.parse(sessionStorage.getItem(storage) || 'null');
