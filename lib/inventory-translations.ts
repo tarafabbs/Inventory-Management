@@ -1,5 +1,6 @@
 // Reused terminology only. Rendering uses React; no DOM mutation or external translation service.
 export const legacyBengali:Record<string,string>={
+'This company is an Office-only vendor. Choose a Workshop company for New Entry. Your product lines are kept when you change company.':'এই কোম্পানিটি শুধু অফিসের বিক্রেতা হিসেবে নথিভুক্ত। নতুন এন্ট্রির জন্য কারখানার কোম্পানি বেছে নিন। কোম্পানি বদলালেও পণ্যের লাইনগুলি থাকবে।',
 'Inventory workspace':'ইনভেন্টরি কর্মক্ষেত্র',
 'Office inventory':'অফিস ইনভেন্টরি',
 'OFFICE':'অফিস',

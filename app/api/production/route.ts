@@ -189,6 +189,8 @@ export async function POST(request: Request) {
                 const company=masters.companies[d.company], product=masters.products[d.product];
                 if (!company || !product)
                     throw reject('Company or category no longer exists.');
+                if (c.kind === 'receipt' && company.office_only)
+                    throw reject('This company is an Office-only vendor. Choose a Workshop company for New Entry. Your product lines are kept when you change company.');
                 if (company.office_only !== product.office_only) throw reject('Choose a category belonging to the same workshop / Office inventory.');
                 if (d.stage.startsWith('office_') && company.ownership !== 'OWN' && !company.office_only) throw reject('Only Own Product or an Office vendor belongs in Office stock.');
                 if (d.quantity > 0 && (!company.active || !product.active))

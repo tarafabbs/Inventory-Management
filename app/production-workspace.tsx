@@ -183,7 +183,9 @@ function Entry({ kind, data, company, busy, save, master, onAction }: {
     const sourceRequired = !!sources[kind];
     const artistSend = ['issue', 'additional', 'reprint', 'return_send'].includes(kind);
     const receiving = ['receive', 'return_receive'].includes(kind);
+    const receiptScopeError = kind === 'receipt' && data.companies.find(x => x.id === c.company)?.office_only ? 'This company is an Office-only vendor. Choose a Workshop company for New Entry. Your product lines are kept when you change company.' : '';
     function addLine() { try {
+        if (receiptScopeError) throw new Error(receiptScopeError);
         if (!Number.isInteger(line.quantity) || line.quantity < 1)
             throw new Error('Enter a whole quantity.');
         if (sourceRequired && !line.source)
@@ -205,7 +207,7 @@ function Entry({ kind, data, company, busy, save, master, onAction }: {
         setError((e as Error).message);
     } }
     async function submit(e: FormEvent) { e.preventDefault(); if (pending.current)
-        return; pending.current = true; setError(''); key.current ||= crypto.randomUUID(); try {
+        return; if (receiptScopeError) { setError(receiptScopeError); return; } pending.current = true; setError(''); key.current ||= crypto.randomUUID(); try {
         sessionStorage.setItem(draftName, JSON.stringify({ c, key: key.current }));
     }
     catch { } try {
@@ -224,7 +226,8 @@ function Entry({ kind, data, company, busy, save, master, onAction }: {
     const artworks = Array.from(new Set([...artisanWorkTypes, ...data.artisans.flatMap(a => a.work_types || [a.work_type || ''])].filter(Boolean)));
     return <form className="prod-form" onSubmit={submit}><fieldset disabled={busy}>
  {restored && <p>{tr("Unsaved draft restored.")}</p>}
- {permitted(data.user.role, 'masterCreate') && <div className="prod-actions"><button type="button" onClick={() => master('company')}>{tr("＋ Create Company")}</button><button type="button" onClick={() => master('artisan')}>{tr("＋ Create Artisan")}</button></div>}<div className="prod-fields"><label>{tr("Date")}<input type="date" value={c.date} required max={today()} onChange={e => edit({ date: e.target.value })}/></label><label>{tr("Company / Party")}<select required value={c.company || ''} onChange={e => { edit({ company: e.target.value, lines: [] }); setLine({ quantity: 1 }); }}><option value="">{tr("Select company")}</option>{data.companies.filter(x => x.active).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>{tr("Bill / Challan No. (optional)")}<input value={c.reference || ''} onChange={e => edit({ reference: e.target.value })}/></label></div>
+ {permitted(data.user.role, 'masterCreate') && <div className="prod-actions"><button type="button" onClick={() => master('company')}>{tr("＋ Create Company")}</button><button type="button" onClick={() => master('artisan')}>{tr("＋ Create Artisan")}</button></div>}<div className="prod-fields"><label>{tr("Date")}<input type="date" value={c.date} required max={today()} onChange={e => edit({ date: e.target.value })}/></label><label>{tr("Company / Party")}<select required value={c.company || ''} onChange={e => { edit({ company: e.target.value, lines: kind === 'receipt' ? (c.lines || []).map(l => ({ ...l, company: e.target.value })) : [] }); if (kind !== 'receipt') setLine({ quantity: 1 }); }}><option value="">{tr("Select company")}</option>{kind === 'receipt' && receiptScopeError && <option value={c.company} disabled>{data.companies.find(x => x.id === c.company)?.name} · {tr('Office inventory')}</option>}{data.companies.filter(x => x.active && (kind !== 'receipt' || !x.office_only)).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>{tr("Bill / Challan No. (optional)")}<input value={c.reference || ''} onChange={e => edit({ reference: e.target.value })}/></label></div>
+ {receiptScopeError && <p role="alert">{tr(receiptScopeError)}</p>}
  {kind === 'opening' && <p>{tr("Enter each stock location once. Artist stock automatically appears in company totals. Financial opening: positive = due, negative = advance. Opening date applies to all accounts.")}</p>}
  {needsLines && <section><h2>{tr("Product Lines")}</h2>
  {sourceRequired && <label>{tr("Find source stock")}<input value={sourceSearch} onChange={e => setSourceSearch(e.target.value)} placeholder={tr("Company, category, artist or artwork")}/></label>}

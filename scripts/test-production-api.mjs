@@ -22,6 +22,22 @@ try{await sql.begin(async tx=>{
  const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});const account=(stage,arts='',work='',artisan='',pool='normal',co=company)=>({company:co,product,pool,stage,arts,work,artisan});
  const send=async(c,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/production',{method:'POST',headers:{'Content-Type':'application/json',origin:'https://im.tarafabbs.com'},body:JSON.stringify({date,...c,key})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const q=async a=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(a)}`)[0]?.quantity||0);
+ if(process.env.IMS_TEST_ENTRY_ONLY==='1'){
+  const vendor=randomUUID(),officeProduct=randomUUID();
+  await tx`insert into inventory.companies(id,name,prefix,ownership,office_only) values(${vendor},'Test Office Vendor','TEV','EXTERNAL',1)`;
+  await tx`insert into inventory.products(id,name,office_only) values(${officeProduct},'Test Office Category',1)`;
+  const receipt={kind:'receipt',company,lines:[{company,product,quantity:10,preferred:'Free Hand Paint'},{company,product,quantity:10,preferred:'Block Print'}]},key=randomUUID();
+  const first=await send(receipt,200,key);await send(receipt,200,key);assert.equal(await q(account('raw')),20);
+  await send(receipt);assert.equal(await q(account('raw')),40);
+  const [saved]=await tx`select payload from inventory.production_events where id=${first.id}`;
+  assert.deepEqual(saved.payload.lines.map(l=>l.preferred),['Free Hand Paint','Block Print']);
+  const wrong=await send({...receipt,company:vendor,lines:receipt.lines.map(l=>({...l,company:vendor}))},400);
+  assert.match(wrong.error,/Office-only vendor/);assert.equal(await q(account('raw')),40);
+  await send({kind:'receipt',company,lines:[{company,product:officeProduct,quantity:5}]},400);
+  await send({kind:'office_vendor',company:vendor,lines:[{company:vendor,product:officeProduct,quantity:5}]});
+  assert.equal(Number((await tx`select quantity from inventory.production_balances where company=${vendor} and product=${officeProduct} and stage='office_stock'`)[0].quantity),5);
+  console.log('PASS: New Entry API/PostgreSQL:',checks,'checks; same category/quantity across artwork lines and repeated deliveries, retained preferred art, retry idempotency, Workshop/Office boundary, Office vendor receipt. Fixtures rolled back.');throw Error('ROLLBACK_TEST');
+ }
  if(process.env.IMS_TEST_STATEMENTS_ONLY==='1'){
   const yesterday=new Date(Date.now()-864e5).toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
   globalThis.__artisanMoney=await load((await source('../lib/artisan-money.ts')).replace(/import \{ paise \} from '\.\/production';/,'const {paise}=globalThis.__prod;'));
