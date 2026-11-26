@@ -24,6 +24,61 @@ try{await sql.begin(async tx=>{
  const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});const account=(stage,arts='',work='',artisan='',pool='normal',co=company)=>({company:co,product,pool,stage,arts,work,artisan});
  const send=async(c,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/production',{method:'POST',headers:{'Content-Type':'application/json',origin:'https://im.tarafabbs.com'},body:JSON.stringify({date,...c,key})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const q=async a=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(a)}`)[0]?.quantity||0);
+ if(process.env.IMS_TEST_DASHBOARD_ONLY==='1'){
+  globalThis.__dashboard=await load(await source('../lib/production-dashboard.ts'));
+  const route=(await source('../app/api/production/dashboard/route.ts'))
+   .replace("import { db } from '@/lib/database';",'const db=globalThis.__db;')
+   .replace("import { inventorySession } from '@/lib/inventory-identity';",'const inventorySession=async()=>globalThis.__identity;')
+   .replace(/import [^;]+ from '@\/lib\/production-dashboard';/,'const {companyPaymentPerformance,stockMetrics}=globalThis.__dashboard;')
+   .replace("import { isManagement, isOfficeRole, permitted } from '@/lib/rules';",'const {isManagement,isOfficeRole,permitted}=globalThis.__rules;');
+  const dashboard=await load(route);
+  const get=async(query,status=200)=>{const r=await dashboard.GET(new Request('https://im.tarafabbs.com/api/production/dashboard?'+query));const b=await r.json();assert.equal(r.status,status,b.error);checks++;return b;};
+  const ago=n=>new Date(Date.parse(date)-n*86400000).toISOString().slice(0,10);
+  const [fixture]=await tx`select (now() at time zone 'Asia/Kolkata')::date::text as day`;
+  assert.equal(fixture.day,date);
+  const raw=account('raw'),artistStock=account('artist','','Free Hand Paint',artist);
+  const ready=account('ready','Free Hand Paint');
+  const opening={...raw,quantity:20},recent={...raw,quantity:100},sent={...artistStock,quantity:50};
+  const insertEvent=async(kind,days,delta,payload={})=>{const id=randomUUID();await tx`insert into inventory.production_events(id,kind,company,event_date,actor_id,actor,actor_role,payload,delta) values(${id},${kind},${company},${ago(days)},${owner.id},'Test Owner','Owner',${JSON.stringify(payload)}::text::jsonb,${JSON.stringify(delta)}::text::jsonb)`;return id;};
+  const balance=async(a,n)=>tx`insert into inventory.production_balances(key,company,product,pool,stage,artisan,arts,work,quantity) values(${prod.accountKey(a)},${a.company},${a.product},${a.pool},${a.stage},${a.artisan},${a.arts},${a.work},${n})`;
+  const baseline={};for(const k of ['on_site','with_artists','custody','ready'])baseline[k]=await get('metric='+k+'&period=recent');
+  await insertEvent('receipt',35,[opening]);
+  await insertEvent('receipt',23,[recent]);
+  const removed=await insertEvent('receipt',2,[{...raw,quantity:5}]);
+  await insertEvent('delete',1,[{...raw,quantity:-5}],{document:removed});
+  await insertEvent('issue',17,[{...raw,quantity:-50},sent]);
+  await insertEvent('receive',2,[{...artistStock,quantity:-10},{...ready,quantity:10}]);
+  const billOne=await insertEvent('dispatch',28,[]);
+  const billTwo=await insertEvent('dispatch',7,[]);
+  const paid=await insertEvent('payment',8,[]);
+  await tx`insert into inventory.production_money(event_id,company,kind,amount) values(${billOne},${company},'bill',20000),(${billTwo},${company},'bill',10000),(${paid},${company},'payment',-15000)`;
+  const corrected=await insertEvent('correct',8,[],{document:paid,correctionKind:'payment',effectiveMoney:[{company,kind:'payment',amount:-12000}]});
+  await tx`insert into inventory.production_money(event_id,company,kind,amount) values(${corrected},${company},'correction',15000),(${corrected},${company},'payment',-12000)`;
+  await balance(raw,70);await balance(artistStock,40);await balance(ready,10);
+  for(const [metric,current,atOpening] of [['on_site',80,20],['with_artists',40,0],['custody',120,20],['ready',10,0]]){
+   const row=await get('metric='+metric+'&period=recent'),old=baseline[metric];assert.equal(row.current-old.current,current);assert.equal(row.opening-old.opening,atOpening);
+   assert.equal(row.opening+row.movements.reduce((n,m)=>n+m.added-m.removed,0),row.current);
+   if(metric==='on_site')assert.equal(row.movements.find(m=>m.kind==='issue').removed-(old.movements.find(m=>m.kind==='issue')?.removed||0),50);
+   if(metric==='custody')assert.deepEqual(row.movements.find(m=>m.kind==='issue'),old.movements.find(m=>m.kind==='issue'));
+  }
+  const perf=await get('mode=performance');
+  assert.deepEqual(perf.stock.filter(b=>b.company===company).map(b=>[b.stage,b.quantity,b.date]),[['raw',70,ago(23)],['artist',40,ago(17)]]);
+  assert.deepEqual(perf.companies.find(r=>r.company===company),{company,paid:12000,balance:18000,lastPaid:ago(8),averageDays:20,oldestUnpaidDays:28});
+  assert.deepEqual([0,10,11,14,15,19,20].map(globalThis.__dashboard.stockAgeBand),[0,0,1,1,2,2,3]);
+  const partial=globalThis.__dashboard.companyPaymentPerformance([
+   {company:'x',date:ago(50),kind:'payment',amount:-500},
+   {company:'x',date:ago(40),kind:'bill',amount:1000},
+   {company:'x',date:ago(35),kind:'damage_adjustment',amount:-200},
+   {company:'x',date:ago(5),kind:'payment',amount:-300},
+  ],date)[0];
+  assert.equal(partial.paid,800);assert.equal(partial.balance,0);assert.equal(partial.averageDays,13.125);assert.equal(partial.oldestUnpaidDays,null);
+  const office=await get('metric=custody&view=office');assert.ok(!office.balances.some(b=>b.company===company));
+  await get('mode=performance&view=office',403);await get('metric=__proto__',400);
+  globalThis.__identity={signedIn:true,staff:{...owner,role:'Office Staff'}};await get('mode=performance',403);
+  const staff=await get('metric=with_artists');assert.equal(staff.current,0);assert.deepEqual(staff.balances,[]);
+  globalThis.__identity={signedIn:false};await get('metric=custody',403);
+  console.log('PASS: dashboard SQL, four reconciled totals, exact issue movement, corrected and reversed entries, pooled age, payment timing and Office/auth scope. Fixture checks:',checks);throw Error('ROLLBACK_TEST');
+ }
  if(process.env.IMS_TEST_ART_STYLES_ONLY==='1'){
   globalThis.__artisanIdentity=await load(await source('../lib/artisan-identity.ts'));
   const mastersSource=(await source('../app/api/production/masters/route.ts')).replace("import { db } from '@/lib/database';",'const db=globalThis.__db;').replace("import { inventorySession } from '@/lib/inventory-identity';",'const inventorySession=async()=>globalThis.__identity;').replace("import { artisanWorkTypes, isManagement, isOfficeRole, permitted, roleLabel } from '@/lib/rules';",'const {artisanWorkTypes,isManagement,isOfficeRole,permitted,roleLabel}=globalThis.__rules;').replace("import { artisanIdentity } from '@/lib/artisan-identity';",'const {artisanIdentity}=globalThis.__artisanIdentity;');

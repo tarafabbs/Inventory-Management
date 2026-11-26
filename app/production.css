@@ -12,3 +12,69 @@
 .prod-profile-filter{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;margin:1rem 0}.prod-profile-filter select{max-width:100%;padding:.65rem;border:1px solid #ddd1eb;border-radius:.65rem;background:white}.prod-profile-status{margin-top:.75rem;padding-top:.5rem;border-top:1px solid #e5ddef}.prod-profile-status summary{cursor:pointer;padding:.6rem 0;font-weight:600}.prod-profile-status label{display:grid;gap:.4rem}.prod-profile-status textarea{width:100%;min-height:5rem;box-sizing:border-box;padding:.6rem;border:1px solid #d3c4e6;border-radius:.6rem}.prod-profile-status button{white-space:normal}.prod-profile-status p{overflow-wrap:anywhere}
 
 .prod-preferred{display:grid;gap:.3rem;margin:.6rem 0;padding:.65rem .8rem;border-left:3px solid #8056b8;background:#f6f2fc;border-radius:.4rem;overflow-wrap:anywhere}.prod-dispute-actions{margin-top:.7rem}.prod-dispute-actions summary{cursor:pointer;padding:.6rem 0;font-weight:600}
+
+.prod .prod-metric-button {
+  min-width: 0;
+  padding: 16px;
+  border-radius: 14px;
+  text-align: left;
+}
+.prod-metric-button small { overflow-wrap: anywhere; }
+.prod-metric-button span { display: block; color: var(--purple); font-size: .85rem; }
+.prod .prod-metric-button[aria-expanded=true] { border-color: var(--purple); background: #f5efff; }
+.prod-home-shortcuts { margin-top: 0; }
+.prod-stock-equation { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.prod-stock-equation div { padding: 10px; background: #f4effb; border-radius: 8px; overflow-wrap: anywhere; }
+.prod-stock-equation dd { margin: 3px 0 0; font-weight: 700; }
+.prod-stock-stages { display: flex; flex-wrap: wrap; gap: 8px; }
+.prod-stock-stages span { padding: 4px 8px; background: #f6f3fa; border-radius: 6px; }
+.prod-report-table { max-width: 100%; overflow-x: auto; }
+.prod-report-table table { width: 100%; border-collapse: collapse; text-align: left; }
+.prod-report-table th, .prod-report-table td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.prod-report-table th { background: #f6f3fa; }
+.prod-report-table tr:last-child td { border-bottom: none; }
+.prod-performance-legend { padding: 0; display: flex; flex-wrap: wrap; gap: 8px; list-style: none; }
+.prod-age-band { display: inline-block; padding: 4px 8px; border-radius: 6px; white-space: nowrap; font-weight: 600; }
+.prod-age-band.band-0 { background: #e8f6ec; color: #235635; }
+.prod-age-band.band-1 { background: #fff2d5; color: #694404; }
+.prod-age-band.band-2 { background: #ffe9dc; color: #8a370f; }
+.prod-age-band.band-3 { background: #fbe6eb; color: #8b2038; }
+@media (max-width: 760px) {
+  .prod .prod-metric-button { padding: 12px; }
+  .prod-stock-equation { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .prod-report-table th, .prod-report-table td { font-size: .86rem; }
+}
+.prod .prod-breakdown-period { max-width: 290px; }
+.prod-home-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 1120px) {
+  .prod-home-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.prod-mobile-cell-label { display: none; }
+@media (max-width: 760px) {
+  .prod-performance-table table, .prod-performance-table tbody { display: block; }
+  .prod-performance-table thead {
+    position: absolute;
+    clip-path: inset(50%);
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .prod-performance-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  .prod-performance-table td {
+    display: block;
+    border: none;
+    padding: 0;
+    overflow-wrap: anywhere;
+  }
+  .prod-performance-table td:first-child, .prod-performance-table td:has(button) { grid-column: 1 / -1; }
+  .prod-mobile-cell-label { display: block; color: #625676; font-size: .76rem; }
+  .prod-mobile-cell-label:empty { display: none; }
+}

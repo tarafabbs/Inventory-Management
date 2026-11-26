@@ -7,6 +7,8 @@ import SignOutButton from './sign-out-button';
 import StaffManagement from './staff-management';
 import ArtisanReceive from './artisan-receive';
 import StatementPanel from './statement-panel';
+import { PerformancePanel, StockBreakdownPanel } from './production-dashboard';
+import { artistStages, onSiteStages, stockMetrics, type StockMetric } from '@/lib/production-dashboard';
 import './production.css';
 import type {Master,Event,Snapshot} from '@/lib/production-types';
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -32,6 +34,7 @@ export default function ProductionWorkspace({ office = false,initialData,initial
     const {t:tr}=useInventoryLanguage();
 
     const [data, setData] = useState<Snapshot|undefined>(initialData);
+    const [activeMetric, setActiveMetric] = useState<StockMetric>();
     const [screen, setScreen] = useState(initialAction ? 'entry' : 'home');
     const [company, setCompany] = useState('');
     const [artisan, setArtisan] = useState('');
@@ -59,11 +62,11 @@ export default function ProductionWorkspace({ office = false,initialData,initial
     } }, [company, page, office]);
     const hasInitialSnapshot=useRef(!!initialData);
     useEffect(() => { if(hasInitialSnapshot.current){hasInitialSnapshot.current=false;return;}void refresh(); }, [refresh]);
-    function go(s: string) { if (['home', 'companies', 'artists', 'factory-disputes', 'statements'].includes(s)) {
+    function go(s: string) { if (['home', 'companies', 'artists', 'factory-disputes', 'statements', 'performance'].includes(s)) {
         setCompany('');
         setArtisan('');
         setPage(0);
-    } setScreen(s); setMenu(false); setNotice(''); setError(''); }
+    } setActiveMetric(undefined); setScreen(s); setMenu(false); setNotice(''); setError(''); }
     function start(k: string) { setEntrySource(undefined); setKind(k); go('entry'); }
     function takeStockAction(k:string,b:Balance){setCompany(b.company);setArtisan('');setEntrySource(b);setKind(k);go('entry');}
     async function save(c: Command, key: string) { setBusy(true); try {
@@ -79,14 +82,14 @@ export default function ProductionWorkspace({ office = false,initialData,initial
         return <main className="prod prod-loading"><h1>IMS TARA MAA</h1><p role="status">{tr(error || 'Loading your stock…')}</p><button onClick={() => void refresh()}>{tr("Reload")}</button></main>;
     const name = (items: Master[], id: string) => items.find(m => m.id === id)?.name || id;
     const balances = data.balances.filter(b => (!company || b.company === company) && (!artisan || b.artisan === artisan));
-    const onSite = balances.filter(b => ['raw', 'ready', 'hold', 'office_stock'].includes(b.stage));
-    const withArtists = balances.filter(b => ['artist', 'reprint'].includes(b.stage));
+    const onSite = balances.filter(b => onSiteStages.some(stage => stage === b.stage));
+    const withArtists = balances.filter(b => artistStages.some(stage => stage === b.stage));
     const sum = (rows: Balance[]) => rows.reduce((s, b) => s + b.quantity, 0);
     const availableActions = Object.keys(actions).filter(k => permitted(data.user.role, actions[k].permission) && (office ? ['office_receive', 'office_sell', 'office_return', 'office_vendor', 'vendor_return'].includes(k) : true));
     const attention = data.balances.filter(b => ['hold', 'reprint', 'office_return'].includes(b.stage) || (['raw', 'artist', 'office_pending'].includes(b.stage) && Date.now() - Date.parse(b.since || '') > 7 * 864e5));
     const outstanding = data.documents.filter(d => d.settled < d.quantity);
-    const nav = ['home', 'companies', ...(office ? [] : ['artists', 'statements', 'factory-disputes', 'company-return', 'dispatch']), 'history', ...(isManagement(data.user.role) ? ['opening', 'stock-check'] : []), ...(isOwner(data.user.role) ? ['access', 'data-control'] : [])];
-    const titles: Record<string, string> = { home: 'Home', statements: 'Reports & Statements', companies: 'Companies', artists: 'Artisans', 'company-return': 'Company Return', dispatch: 'Dispatch Done', 'factory-disputes': 'Factory Disputes', history: 'History', opening: 'Opening Balance', 'stock-check': 'Stock Check', access: 'Staff Access', 'data-control': 'Owner Data Control' };
+    const nav = ['home', 'companies', ...(office ? [] : ['artists', 'statements', 'factory-disputes', 'performance', 'company-return', 'dispatch']), 'history', ...(isManagement(data.user.role) ? ['opening', 'stock-check'] : []), ...(isOwner(data.user.role) ? ['access', 'data-control'] : [])];
+    const titles: Record<string, string> = { home: 'Home', statements: 'Reports & Statements', performance: 'Performance', companies: 'Companies', artists: 'Artisans', 'company-return': 'Company Return', dispatch: 'Dispatch Done', 'factory-disputes': 'Factory Disputes', history: 'History', opening: 'Opening Balance', 'stock-check': 'Stock Check', access: 'Staff Access', 'data-control': 'Owner Data Control' };
     const companyData = data.companies.find(c => c.id === company);
     const matchesProfile=(p:Master)=>profilesView==='all'||(profilesView==='current'?['active','paused'].includes(profileStatus(p)):profileStatus(p)===profilesView);
     return <div className="prod">
@@ -102,7 +105,23 @@ export default function ProductionWorkspace({ office = false,initialData,initial
  <main className="prod-main">
  {error && <p role="alert" className="prod-error">{tr(error)} <button onClick={() => void refresh()}>{tr("Reload")}</button></p>}{notice && <p role="status" className="prod-success">{tr(notice)}</p>}
  <div className="prod-heading"><h1>{screen === 'entry' ? tr(actions[kind]?.label||'') : screen === 'company' ? companyData?.name : tr(titles[screen] || 'Stock Management')}</h1><input aria-label={tr("Search companies, artists or stock")} placeholder={tr("Search…")} value={search} onChange={e => setSearch(e.target.value)}/></div>
- {screen === 'home' && <><div className="prod-metrics"><Metric label={tr("Physically in factory / office")} n={sum(onSite)}/><Metric label={tr("With artists")} n={sum(withArtists)}/><Metric label={tr("Total in our custody")} n={sum(onSite) + sum(withArtists)}/><Metric label={tr("Ready to Dispatch")} n={sum(balances.filter(b => b.stage === 'ready'))}/></div><div className="prod-actions">{(office ? ['office_receive', 'office_sell', 'office_return'] : ['receipt', 'issue', 'receive', 'dispatch', 'company_return', 'dispute']).filter(k => availableActions.includes(k)).map(k => <button key={k} onClick={() => start(k)}>{tr(actions[k].label)}</button>)}</div><section><h2>{tr("Dispatch Done")}</h2><p>{tr("Company-wise bills, date, product quantities and optional GST bill number.")}</p><button onClick={() => go('dispatch')}>{tr("View Dispatches")}</button></section><StockCards rows={balances.filter(b => !['delivered', 'raw_returned', 'damaged', 'office_sold'].includes(b.stage))} data={data} search={search}/></>}
+ {screen === 'home' && <>
+ <div className="prod-metrics prod-home-metrics">{(Object.keys(stockMetrics) as StockMetric[]).map(metric => {
+    const { label, stages } = stockMetrics[metric];
+    const quantity = sum(balances.filter(row => stages.some(stage => stage === row.stage)));
+    return <button className="prod-metric-button" type="button" key={metric} aria-expanded={activeMetric === metric}
+        aria-controls={activeMetric === metric ? 'home-stock-breakdown' : undefined}
+        onClick={() => setActiveMetric(activeMetric === metric ? undefined : metric)}>
+        <small>{tr(label)}</small><strong className="prod-number">{quantity.toLocaleString('en-IN')} <small>{tr('pcs')}</small></strong>
+        <span>{tr(activeMetric === metric ? 'Hide breakdown' : 'View breakdown')} {activeMetric === metric ? '▴' : '▾'}</span>
+    </button>;
+ })}</div>
+ {!office && <div className="prod-actions prod-home-shortcuts">
+    <button onClick={() => go('factory-disputes')}>{tr('Factory Disputes')}</button>
+    <button onClick={() => go('performance')}>{tr('Performance')}</button>
+ </div>}
+ {activeMetric && <StockBreakdownPanel data={data} metric={activeMetric} office={office}/>}
+ <div className="prod-actions">{(office ? ['office_receive', 'office_sell', 'office_return'] : ['receipt', 'issue', 'receive', 'dispatch', 'company_return', 'dispute']).filter(k => availableActions.includes(k)).map(k => <button key={k} onClick={() => start(k)}>{tr(actions[k].label)}</button>)}</div><section><h2>{tr("Dispatch Done")}</h2><p>{tr("Company-wise bills, date, product quantities and optional GST bill number.")}</p><button onClick={() => go('dispatch')}>{tr("View Dispatches")}</button></section><StockCards rows={balances.filter(b => !['delivered', 'raw_returned', 'damaged', 'office_sold'].includes(b.stage))} data={data} search={search}/></>}
  {screen === 'companies' && <>{(permitted(data.user.role,'masterCreate')||isOfficeRole(data.user.role)&&permitted(data.user.role,'officeMaster'))&&<button onClick={()=>setMaster('company')}>{tr('＋ Create Company')}</button>}<ProfileFilter value={profilesView} change={setProfilesView}/><div className="prod-grid">{data.companies.filter(matchesProfile).filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => <section key={c.id}><h2>{c.name}</h2><p>{sum(data.balances.filter(b => b.company === c.id && ['raw', 'ready', 'hold', 'artist', 'reprint'].includes(b.stage)))}  {tr("pcs in our custody")}</p>{!office && <p>{tr("Due / credit:")} {money(Number(data.money.find(m => m.company === c.id)?.due || 0))}</p>}<button onClick={() => { setCompany(c.id); setArtisan(''); setPage(0); go('company'); }}>{tr("Open profile")}</button>{!office&&<button onClick={()=>{setCompany(c.id);setArtisan('');setPage(0);setTab('statement');go('company');}}>{tr('Statement / PDF')}</button>}<ProfileStatusControls kind="company" item={c} owner={isOwner(data.user.role)} saved={refresh}/></section>)}</div></>}
  {screen === 'company' && <><button onClick={() => { setCompany(''); go('companies'); }}>{tr("← All Companies")}</button>{companyData&&<ProfileStatusControls kind="company" item={companyData} owner={isOwner(data.user.role)} saved={refresh}/>}<div className="prod-tabs">{['stock', 'khata', 'statement', 'reports', 'damage'].map(t => <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>{tr(({ stock: 'Stock & Progress', statement: 'Statement / PDF', khata: 'Company Khata', reports: 'Reports', damage: 'Damage Charge' })[t])}</button>)}</div>
  {tab === 'stock' && <><div className="prod-metrics"><Metric label={tr("In factory")} n={sum(onSite)}/><Metric label={tr("With artists")} n={sum(withArtists)}/><Metric label={tr("Total in custody")} n={sum(onSite) + sum(withArtists)}/><Metric label={tr("With company")} n={sum(balances.filter(b => b.stage === 'delivered'))}/></div><div className="prod-actions">{['receipt', 'issue', 'receive', 'dispatch', 'company_return'].filter(k => availableActions.includes(k)).map(k => <button key={k} onClick={() => start(k)}>{tr(actions[k].label)}</button>)}</div><h2>{tr("Main Production")}</h2><StockCards rows={balances.filter(b => b.pool === 'normal')} data={data} search={search}/><h2>{tr("Company Return — Separate Stock")}</h2><StockCards rows={balances.filter(b => b.pool === 'company_return')} data={data} search={search}/></>}
@@ -113,6 +132,9 @@ export default function ProductionWorkspace({ office = false,initialData,initial
  </>}
  {screen === 'artists' && <><ProfileFilter value={profilesView} change={setProfilesView}/><div className="prod-actions"><button onClick={() => setMaster('artisan')}>{tr("＋ Create Artisan")}</button>{permitted(data.user.role,'masterCreate')&&<button onClick={()=>setMaster('art_style')}>{tr('＋ Create Art Style')}</button>}</div><select aria-label={tr("Select artist")} value={artisan} onChange={e => setArtisan(e.target.value)}><option value="">{tr("All artisans")}</option>{data.artisans.filter(matchesProfile).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select><div className="prod-grid">{data.artisans.filter(matchesProfile).filter(a => (!artisan || a.id === artisan) && a.name.toLowerCase().includes(search.toLowerCase())).map(a => <section key={a.id}><h2>{a.name}</h2><p>{(a.work_types || [a.work_type]).join(', ')}</p><p>{tr("Total pending:")} {sum(data.balances.filter(b => b.artisan === a.id))}  {tr("pcs")}</p><button onClick={() => setArtisan(a.id)}>{tr("View pending")}</button><button onClick={() => setMaster('artisan:' + a.id)}>{tr("Edit profile")}</button><ProfileStatusControls kind="artisan" item={a} owner={isOwner(data.user.role)} saved={refresh}/></section>)}</div><StockCards rows={data.balances.filter(b => !!b.artisan && (!artisan || b.artisan === artisan))} data={data} search={search}/>{artisan&&<><StatementPanel data={data} scope="artisan" id={artisan}/><ArtistSummary artisan={artisan}/><History data={data} defaultArtist={artisan} save={save}/></>}</>}
  {screen === 'company-return' && <><p>{tr("Company totals only. No bill matching. This stock never mixes with internal reprint.")}</p><div className="prod-actions">{['company_return', 'return_send', 'return_receive', 'dispatch'].filter(k => availableActions.includes(k)).map(k => <button key={k} onClick={() => start(k)}>{tr(actions[k].label)}</button>)}</div><StockCards rows={balances.filter(b => b.pool === 'company_return')} data={data} search={search}/></>}
+ {screen === 'performance' && !office && <PerformancePanel data={data} search={search} companyStatement={id => {
+    setCompany(id); setArtisan(''); setPage(0); setTab('statement'); go('company');
+ }}/>}
  {screen === 'statements' && !office && <StatementPanel data={data}/>}
  {screen === 'movement' && <div className="prod-actions">{availableActions.map(k => <button key={k} onClick={() => start(k)}>{tr(actions[k].label)}</button>)}</div>}
  {screen === 'entry' && (kind === 'receive' ? <ArtisanReceive key={entrySource?accountKey(entrySource):'receive'} data={data} busy={busy} save={save} initialArtisan={entrySource?.artisan} initialCompany={entrySource?.company}/> : <Entry key={kind + company+(entrySource?accountKey(entrySource):'')} kind={kind} data={data} company={company} busy={busy} save={save} master={setMaster} onAction={start} initialSource={entrySource}/>)}
