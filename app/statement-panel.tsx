@@ -33,7 +33,7 @@ export default function StatementPanel({data,scope:fixedScope,id:fixedId}:{data:
   {doc&&report&&<><div className="statement-title"><h2>{doc.title}</h2><p>{doc.subtitle}</p><small>{doc.generated}</small></div><div className="prod-metrics statement-metrics">{doc.metrics.map(m=><section key={m.label}><small>{m.label}</small><strong>{m.value}</strong></section>)}</div><div className="statement-notes">{doc.notes.map((n,i)=><p key={i}>{n}</p>)}</div>
    <div className="statement-shortcuts">{doc.sections.map(s=><a key={s.id} href={'#statement-'+actualScope+'-'+actualId+'-'+s.id}>{s.title}</a>)}</div>
    {doc.sections.map(s=><ReportTable key={s.id+report.generatedAt} section={s} anchor={'statement-'+actualScope+'-'+actualId+'-'+s.id}/>)}
-   {actualScope==='artisan'&&isManagement(data.user.role)&&<ArtisanMoneyForm key={actualId} artisan={actualId} role={data.user.role} report={report} onSaved={()=>setRevision(v=>v+1)}/>}
+   {actualScope==='artisan'&&isManagement(data.user.role)&&<ArtisanMoneyForm key={data.user.id+':'+actualId} artisan={actualId} userId={data.user.id} role={data.user.role} report={report} onSaved={()=>setRevision(v=>v+1)}/>}
   </>}
  </section>;
 }
@@ -41,11 +41,11 @@ function ReportTable({section:s,anchor}:{section:StatementSection;anchor:string}
  const {t:tr}=useInventoryLanguage();const [limit,setLimit]=useState(100);
  return <details className="statement-section" id={anchor} open={['companies','artisans','disputes','company-ledger','artisan-ledger'].includes(s.id)}><summary>{s.title} <small>({s.rows.length.toLocaleString('en-IN')})</small></summary>{s.note&&<p className="statement-note">{s.note}</p>}{!s.rows.length?<p>{tr('No entries in this period.')}</p>:<><div className="statement-table-scroll"><table><thead><tr>{s.headers.map((h,i)=><th key={i} scope="col">{h}</th>)}</tr></thead><tbody>{s.rows.slice(0,limit).map((row,i)=><tr key={i}>{row.map((v,j)=><td key={j}>{v}</td>)}</tr>)}</tbody></table></div>{limit<s.rows.length&&<p>{tr('Screen preview only; the PDF includes every row.')} <button type="button" onClick={()=>setLimit(n=>n+100)}>{tr('Show more rows')}</button></p>}</>}</details>;
 }
-function ArtisanMoneyForm({artisan,role,report,onSaved}:{artisan:string;role:string;report:StatementReport;onSaved:()=>void}){
+function ArtisanMoneyForm({artisan,userId,role,report,onSaved}:{artisan:string;userId:string;role:string;report:StatementReport;onSaved:()=>void}){
  const {t:tr}=useInventoryLanguage();
  const initial=():ArtisanMoneyCommand=>({artisan,date:today(),kind:'payment',amount:0,reference:'',notes:''});
  const [c,setC]=useState<ArtisanMoneyCommand>(initial),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[hydrated,setHydrated]=useState(false);
- const key=useRef(''),pending=useRef(false),storage='ims-artisan-money:'+artisan;
+ const key=useRef(''),pending=useRef(false),storage='ims-artisan-money:'+userId+':'+artisan;
  useEffect(()=>{try{const saved=JSON.parse(sessionStorage.getItem(storage)||'null');if(saved?.c?.artisan===artisan){setC(saved.c);key.current=saved.key||'';}}catch{/* Optional storage. */}setHydrated(true);},[artisan,storage]);
  useEffect(()=>{if(hydrated)try{sessionStorage.setItem(storage,JSON.stringify({c,key:key.current}));}catch{/* Optional storage. */}},[c,hydrated,storage]);
  const change=(patch:Partial<ArtisanMoneyCommand>)=>{setC(x=>({...x,...patch}));key.current='';setError('');setNotice('');};
