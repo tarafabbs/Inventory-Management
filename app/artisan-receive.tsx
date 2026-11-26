@@ -6,7 +6,7 @@ import { artisanPending, artisanReceiptCommand, type ArtisanReceiptDraft } from 
 import type { Snapshot } from '@/lib/production-types';
 
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-const empty = (): ArtisanReceiptDraft => ({ artisan: '', company: '', date: today(), quantities: {}, disputed: false, disputes: {}, notes: '' });
+const empty = (): ArtisanReceiptDraft => ({ artisan: '', company: '', date: today(), quantities: {}, disputed: false, disputes: {}, notes: '', amount: 0, reference: '' });
 const total = (rows: { quantity: number }[]) => rows.reduce((s, b) => s + b.quantity, 0);
 
 export default function ArtisanReceive({ data, busy, save }: {
@@ -116,6 +116,8 @@ export default function ArtisanReceive({ data, busy, save }: {
                             </label><small>{tr('Still with artisan before repaint:')} {b.quantity - n} {tr('pcs')}</small></div>
                         </section>;
                     })}</div>
+                    <div className="prod-fields"><label>{tr('Artisan bill / reference (optional)')}<input maxLength={200} value={draft.reference||''} onChange={e=>change({reference:e.target.value})}/></label><label>{tr('Artisan work charge (₹)')}<input type="number" min="0" step="0.01" value={draft.amount||0} onChange={e=>change({amount:Number(e.target.value)})}/></label></div>
+                    <p>{tr('Work charge adds to artisan due. Payment is separate; existing advance automatically offsets this charge. Enter zero for free rework.')}</p>
                     <label>{tr('Remarks / Reason')}<textarea rows={2} value={draft.notes} onChange={e => change({ notes: e.target.value })}/></label>
                     <label className="prod-check"><input type="checkbox" checked={draft.disputed} onChange={e => change({ disputed: e.target.checked, disputes: {} })}/>{tr('Dispute — return part of this receipt to the same artisan for repaint')}</label>
                     {draft.disputed && <section className="receipt-dispute"><p>{tr('Disputed pieces go directly to artisan repaint and appear in Factory Disputes. They do not enter Ready to Dispatch or Company Return.')}</p>

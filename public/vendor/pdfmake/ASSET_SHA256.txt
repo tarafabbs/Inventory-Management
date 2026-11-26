@@ -1,0 +1,5 @@
+c2fd3a5e24db096c9139bb7d266765de433b0b866d03ba356c2ef4d9ae1a53b7  public/vendor/pdfmake/pdfmake-0.2.20.min.js
+d135765781d1a4aebc7dd4a2af221427ec8689060121d8a48b19bca3eeb3977e  public/fonts/hind-siliguri/HindSiliguri-Bold.ttf
+45071a7da902a74877f432722f525d00502d61aef71fca4cab3da8a23156c33d  public/fonts/hind-siliguri/HindSiliguri-Regular.ttf
+c976e4b1b99edc88775377fcc21692ca4bfa46b6d6ca6522bfda505b28ff9d6a  public/fonts/noto-sans/NotoSans-Bold.ttf
+b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5  public/fonts/noto-sans/NotoSans-Regular.ttf

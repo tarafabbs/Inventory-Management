@@ -14,6 +14,7 @@ export type Master = {
 };
 export type Event = {
     id: string;
+    company?: string;
     kind: string;
     event_date: string;
     reference: string;

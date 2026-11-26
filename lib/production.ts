@@ -50,10 +50,12 @@ export type Command = {
     correctionKind?: string;
     effectiveDelta?: Delta[];
     effectiveMoney?: {company:string;amount:number;kind:string}[];
+    effectiveArtisanMoney?: {artisan:string;amount:number;kind:string}[];
     originalCreatedAt?: string;
     originalActorId?: string;
 };
 export type Document = {
+    voided?: boolean;
     id: string;
     kind: string;
     company: string;
@@ -64,6 +66,7 @@ export type Document = {
     created_at?: string;
 };
 export type Plan = {
+    artisanMoney?: {artisan:string;amount:number;kind:string}[];
     deltas: Delta[];
     money: {
         company: string;
@@ -268,6 +271,14 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
     if(p.damage&&new Set(lines.map(l=>l.source?.product)).size>1)throw new Error('Record damage separately for each product category.');
     if (c.kind === 'dispatch')
         p.money.push({ company: c.company || '', amount: paise(c.amount ?? 0), kind: 'bill' });
+    if (['receive','return_receive'].includes(c.kind)) {
+        const amount=paise(c.amount??0);
+        if(amount){
+            const artists=new Set(lines.map(l=>l.source?.artisan).filter(Boolean));
+            if(artists.size!==1)throw new Error('Record a work charge for one artisan at a time.');
+            p.artisanMoney=[{artisan:[...artists][0]!,amount,kind:'charge'}];
+        }
+    }
     if (c.kind === 'payment') {
         const amount = paise(c.amount);
         if (!amount || !c.company)

@@ -142,15 +142,18 @@ export async function POST(request: Request) {
                     amount: number;
                 }>()).results;
                 const money = (old.payload.effectiveMoney||oldMoney).map(m => ({ ...m, amount: -m.amount, kind: 'correction' }));
+                const oldArtisanMoney=(await tx.prepare('SELECT artisan,amount::float8 AS amount,kind FROM inventory.artisan_money WHERE event_id=?::uuid').bind(old.id).all<{artisan:string;amount:number;kind:string}>()).results;
+                const artisanMoney=(old.payload.effectiveArtisanMoney||oldArtisanMoney).map(m=>({...m,amount:-m.amount,kind:'stock_correction'}));
                 if (c.kind === 'correct') {
                     const effective = { ...old.payload, kind:old.kind, date: c.date,reference:c.reference??old.payload.reference, notes: c.notes, lines: c.lines || old.payload.lines, amount: c.amount ?? old.payload.amount };
                     p = planCommand(effective, [...map.values()], documents);
-                    eventPayload = { ...effective, kind: 'correct', document: old.id, correctionKind: old.kind,effectiveDelta:p.deltas,effectiveMoney:p.money,originalCreatedAt:old.payload.originalCreatedAt||old.created_at.toISOString(),originalActorId:old.payload.originalActorId||old.actor_id };
+                    eventPayload = { ...effective, kind: 'correct', document: old.id, correctionKind: old.kind,effectiveDelta:p.deltas,effectiveMoney:p.money,effectiveArtisanMoney:p.artisanMoney||[],originalCreatedAt:old.payload.originalCreatedAt||old.created_at.toISOString(),originalActorId:old.payload.originalActorId||old.actor_id };
                     p.deltas = [...reversed, ...p.deltas];
                     p.money = [...money, ...p.money];
+                    p.artisanMoney=[...artisanMoney,...(p.artisanMoney||[])];
                 }
                 else
-                    p = { deltas: reversed, money };
+                    p = { deltas: reversed, money, artisanMoney };
             }
             else
                 p = planCommand(c, balances, documents);
@@ -228,6 +231,9 @@ export async function POST(request: Request) {
                 }
             }
             const id = randomUUID();
+            // Effective accounting snapshots are server-derived, never accepted
+            // from a client payload and later trusted during a correction.
+            if(c.kind!=='correct')eventPayload={...eventPayload,effectiveDelta:p.deltas,effectiveMoney:p.money,effectiveArtisanMoney:p.artisanMoney||[]};
             await tx.prepare('INSERT INTO inventory.production_events(id,kind,company,event_date,reference,notes,actor_id,actor,actor_role,payload,delta) VALUES(?::uuid,?,?,?::date,?,?,?,?,?,?::text::jsonb,?::text::jsonb)').bind(id, c.kind, c.company || c.targetCompany || p.deltas[0]?.company || '', c.date, c.reference || '', c.notes || '', u.id, u.name, roleLabel(u.role), JSON.stringify(eventPayload), JSON.stringify(p.deltas)).run();
             // Aggregate net deltas before UPSERT: corrections may reverse and repost the same account.
             const net = new Map<string, Delta>();
@@ -243,6 +249,8 @@ export async function POST(request: Request) {
                 }
             for (const m of p.money)
                 await tx.prepare('INSERT INTO inventory.production_money(event_id,company,amount,kind) VALUES(?::uuid,?,?,?)').bind(id, m.company, m.amount, m.kind).run();
+            for(const m of p.artisanMoney||[])
+                await tx.prepare('INSERT INTO inventory.artisan_money(artisan,event_id,entry_date,kind,amount,reference,notes,actor_id,actor,actor_role) VALUES(?,?::uuid,?::date,?,?,?,?,?,?,?)').bind(m.artisan,id,c.date,m.kind,m.amount,c.reference||'',c.notes||'',u.id,u.name,roleLabel(u.role)).run();
             if (p.damage || p.order) {
                 const doc = p.damage || p.order!;
                 await tx.prepare('INSERT INTO inventory.production_documents(id,kind,company,quantity,amount,payload) VALUES(?::uuid,?,?,?,?,?::text::jsonb)').bind(id, p.damage ? 'damage' : 'order', doc.company, doc.quantity, Math.round((c.amount || 0) * 100), JSON.stringify(c)).run();
