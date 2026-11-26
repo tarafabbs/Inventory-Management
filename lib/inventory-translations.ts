@@ -1,5 +1,11 @@
 // Reused terminology only. Rendering uses React; no DOM mutation or external translation service.
 export const legacyBengali:Record<string,string>={
+'＋ Create Art Style':'＋ নতুন শিল্পকাজের ধরন',
+'Create Art Style':'শিল্পকাজের ধরন তৈরি করুন',
+'Save Art Style':'শিল্পকাজের ধরন সেভ করুন',
+'art_style':'শিল্পকাজের ধরন',
+'Create art styles from Workshop access.':'কারখানার অ্যাক্সেস থেকে নতুন শিল্পকাজের ধরন তৈরি করুন।',
+
 'Office profile access required.':'অফিসের প্রোফাইল তৈরির অনুমতি প্রয়োজন।',
 'Take action':'ব্যবস্থা নিন',
 'Return raw dispute to company · Bill & Dispatch':'কাঁচা মালের সমস্যা: বিল করে কোম্পানিকে ফেরত দিন',

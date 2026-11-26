@@ -11,9 +11,10 @@ export async function POST(request: Request) {
         if (!signedIn || !u)
             return Response.json({ error: 'Sign in.' }, { status: 401 });
         const v = await request.json();
-        const entity = { company: 'companies', product: 'products', artisan: 'artisans' }[String(v.kind)];
+        const entity = { company: 'companies', product: 'products', artisan: 'artisans', art_style:'inventory.art_styles' }[String(v.kind)];
         if (!entity)
             throw Error('Choose profile type.');
+        if(entity==='inventory.art_styles'&&(isOfficeRole(u.role)||v.id))return Response.json({error:'Create art styles from Workshop access.'},{status:403});
         if (!permitted(u.role, v.id ? 'master' : 'masterCreate') && !(isOfficeRole(u.role) && permitted(u.role, 'officeMaster')))
             return Response.json({ error: 'Access denied.' }, { status: 403 });
         if(v.view==='office'&&!isManagement(u.role)&&!isOfficeRole(u.role))return Response.json({error:'Office profile access required.'},{status:403});
@@ -45,10 +46,13 @@ export async function POST(request: Request) {
                 throw Error('Profile no longer exists.');
             if (isOfficeRole(u.role) && (entity === 'artisans' || old && !old.office_only))
                 throw Error('Office profiles only.');
-            if (await tx.prepare(`SELECT id FROM ${entity} WHERE lower(trim(name))=lower(?) AND id<>?`).bind(name, v.id || '').first())
+            if (await tx.prepare(`SELECT id FROM ${entity} WHERE lower(trim(name))=lower(?) AND id::text<>?`).bind(name, v.id || '').first())
                 throw Error('This name is already listed.');
             const id = v.id || randomUUID();
-            if (entity === 'artisans') {
+            if(entity==='inventory.art_styles') {
+                await tx.prepare('INSERT INTO inventory.art_styles(id,name,created_by) VALUES(?::uuid,?,?)').bind(id,name,u.id).run();
+            }
+            else if (entity === 'artisans') {
                 const works = Array.isArray(v.work_types) ? Array.from(new Set(v.work_types as string[])) : [];
                 if (!works.length || works.length > 30 || works.some(w => typeof w !== 'string' || !w.trim() || w.length > 120))
                     throw Error('Choose one or more artwork names (up to 120 characters each).');
@@ -62,6 +66,13 @@ export async function POST(request: Request) {
                     const ids = artisanIdentity(v);
                     await tx.prepare('INSERT INTO artisans(id,name,contact,address,work_type,work_types,work_description,gst_no,pan_no,aadhaar_no) VALUES(?,?,?,?,?,?::text[],?,?,?,?)').bind(id, name, contact, address, works[0], '{' + works.map(w => JSON.stringify(w)).join(',') + '}', v.work_description || '', ids.gst, ids.pan, ids.aadhaar).run();
                 }
+                await tx.prepare(`WITH added AS (
+                  INSERT INTO inventory.art_styles(name,created_by)
+                  SELECT DISTINCT btrim(work),?::text FROM unnest(?::text[]) AS names(work)
+                  ON CONFLICT DO NOTHING RETURNING id,name
+                ) INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label,after_data)
+                  SELECT ?,?,?,'production_art_style_created',name,jsonb_build_object('id',id,'name',name,'source','artisan_profile') FROM added
+                `).bind(u.id,'{'+works.map(w=>JSON.stringify(w)).join(',')+'}',u.id,u.name,roleLabel(u.role)).run();
             }
             else if (entity === 'companies') {
                 if (old) {
@@ -80,7 +91,7 @@ export async function POST(request: Request) {
                 await tx.prepare('UPDATE products SET name=? WHERE id=?').bind(name, id).run();
             else
                 await tx.prepare('INSERT INTO products(id,name,office_only) VALUES(?,?,?)').bind(id, name, officeCreation ? 1 : 0).run();
-            await tx.prepare('INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label,before_data,after_data) VALUES(?,?,?,?,?,?::text::jsonb,?::text::jsonb)').bind(u.id, u.name, roleLabel(u.role), 'production_profile_' + (old ? 'updated' : 'created'), name, JSON.stringify(old ? Object.fromEntries(Object.entries(old).filter(([k]) => !['gst_no', 'pan_no', 'aadhaar_no'].includes(k))) : null), JSON.stringify({ id, name, contact, address, notes })).run();
+            await tx.prepare('INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label,before_data,after_data) VALUES(?,?,?,?,?,?::text::jsonb,?::text::jsonb)').bind(u.id, u.name, roleLabel(u.role), entity==='inventory.art_styles'?'production_art_style_created':'production_profile_' + (old ? 'updated' : 'created'), name, JSON.stringify(old ? Object.fromEntries(Object.entries(old).filter(([k]) => !['gst_no', 'pan_no', 'aadhaar_no'].includes(k))) : null), JSON.stringify({ id, name, contact, address, notes })).run();
             const result = { ok: true, id };
             await tx.prepare('INSERT INTO inventory.production_requests(id,actor_id,fingerprint,result) VALUES(?,?,?,?::text::jsonb)').bind(v.key, u.id, hash, JSON.stringify(result)).run();
             return result;

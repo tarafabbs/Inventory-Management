@@ -41,6 +41,7 @@ export type Snapshot = {
     companies: Master[];
     products: Master[];
     artisans: Master[];
+    artStyles?:Master[];
     money: {
         company: string;
         due: number;

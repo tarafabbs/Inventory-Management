@@ -67,8 +67,9 @@ export async function POST(request: Request) {
                 tx.prepare(`SELECT
                   (SELECT coalesce(jsonb_object_agg(id,jsonb_build_object('ownership',ownership,'office_only',office_only,'active',active)),'{}') FROM companies) AS companies,
                   (SELECT coalesce(jsonb_object_agg(id,jsonb_build_object('office_only',office_only,'active',active)),'{}') FROM products) AS products,
+                  (SELECT coalesce(jsonb_agg(name),'[]') FROM inventory.art_styles WHERE active=1) AS art_styles,
                   (SELECT coalesce(jsonb_object_agg(id,jsonb_build_object('active',active,'work_type',work_type,'work_types',work_types)),'{}') FROM artisans) AS artisans
-                `).first<{companies:Record<string,{ownership:string;office_only:number;active:number}>;products:Record<string,{office_only:number;active:number}>;artisans:Record<string,{active:number;work_type:string;work_types:string[]}>}>()
+                `).first<{art_styles:string[];companies:Record<string,{ownership:string;office_only:number;active:number}>;products:Record<string,{office_only:number;active:number}>;artisans:Record<string,{active:number;work_type:string;work_types:string[]}>}>()
             ]);
             if (!masters) throw reject('Stock profiles unavailable.');
             const balances=stockRows.results, documents=documentRows.results;
@@ -167,7 +168,7 @@ export async function POST(request: Request) {
                 throw reject('Later movements depend on this entry. Correction would make stock negative.', 409);
             for (const l of c.lines || []) {
                 if (l.artwork && l.artwork !== 'Legacy work — review') {
-                    const valid = Object.values(masters.artisans).some(a=>a.active&&(a.work_types.includes(l.artwork!)||a.work_type===l.artwork));
+                    const valid = masters.art_styles.includes(l.artwork)||Object.values(masters.artisans).some(a=>a.active&&(a.work_types.includes(l.artwork!)||a.work_type===l.artwork));
                     if (!valid)
                         throw reject('Choose a listed artwork.');
                 }

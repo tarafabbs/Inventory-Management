@@ -21,6 +21,7 @@ export async function productionSnapshot(user:Pick<InventoryUser,'id'|'name'|'ro
  coalesce((SELECT jsonb_agg(jsonb_build_object('id',p.id,'name',p.name,'active',p.active,'office_only',p.office_only) ORDER BY p.name)
    FROM products p ${office?"WHERE p.office_only=1 OR p.id IN (SELECT product FROM stock)":''}),'[]') AS products,
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'active',a.active,'profile_status',a.profile_status,'work_type',a.work_type,'work_description',a.work_description,'work_types',a.work_types,'contact',a.contact,'address',a.address) ORDER BY a.name) FROM artisans a),'[]')"} AS artisans,
+ ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'active',s.active) ORDER BY s.name) FROM inventory.art_styles s WHERE s.active=1),'[]')"} AS "artStyles",
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(m) FROM (SELECT company,sum(amount)::float8 AS due FROM inventory.production_money GROUP BY company) m),'[]')"} AS money,
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(d ORDER BY d.created_at DESC) FROM inventory.production_documents d WHERE d.voided_at IS NULL),'[]')"} AS documents,
  coalesce((SELECT value FROM settings WHERE key='production_opening_date'),'') AS "openingDate"
