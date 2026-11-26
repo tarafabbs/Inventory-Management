@@ -16,11 +16,11 @@ export async function productionSnapshot(user:Pick<InventoryUser,'id'|'name'|'ro
  ) SELECT
  coalesce((SELECT jsonb_agg(s ORDER BY s.company,s.product,s.stage) FROM stock s),'[]') AS balances,
  coalesce((SELECT jsonb_agg(h ORDER BY h.created_at DESC,h.id DESC) FROM history h),'[]') AS history,
- coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.id,'name',c.name,'active',c.active,'ownership',c.ownership,'office_only',c.office_only,'contact',c.contact,'address',c.address,'notes',c.notes) ORDER BY c.name)
+ coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.id,'name',c.name,'active',c.active,'profile_status',c.profile_status,'ownership',c.ownership,'office_only',c.office_only,'contact',c.contact,'address',c.address,'notes',c.notes) ORDER BY c.name)
    FROM companies c ${office?"WHERE c.ownership='OWN' OR c.office_only=1":''}),'[]') AS companies,
  coalesce((SELECT jsonb_agg(jsonb_build_object('id',p.id,'name',p.name,'active',p.active,'office_only',p.office_only) ORDER BY p.name)
    FROM products p ${office?"WHERE p.office_only=1 OR p.id IN (SELECT product FROM stock)":''}),'[]') AS products,
- ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'active',a.active,'work_type',a.work_type,'work_description',a.work_description,'work_types',a.work_types,'contact',a.contact,'address',a.address) ORDER BY a.name) FROM artisans a),'[]')"} AS artisans,
+ ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'active',a.active,'profile_status',a.profile_status,'work_type',a.work_type,'work_description',a.work_description,'work_types',a.work_types,'contact',a.contact,'address',a.address) ORDER BY a.name) FROM artisans a),'[]')"} AS artisans,
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(m) FROM (SELECT company,sum(amount)::float8 AS due FROM inventory.production_money GROUP BY company) m),'[]')"} AS money,
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(d ORDER BY d.created_at DESC) FROM inventory.production_documents d WHERE d.voided_at IS NULL),'[]')"} AS documents,
  coalesce((SELECT value FROM settings WHERE key='production_opening_date'),'') AS "openingDate"

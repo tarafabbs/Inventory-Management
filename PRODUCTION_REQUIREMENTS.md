@@ -68,3 +68,8 @@ Approved 25 November 2026. This document supersedes piece-code, challan-matched 
 - Owner/Management may enter prior artisan opening, unrecorded older charges, payments, cash returns and reasoned adjustments. Only Owner reverses manual money entries. Linked receipt charges are corrected through receipt history, with every reversal/correction retained.
 - Monetary amounts are integer paise. Stock reset does not erase either money ledger. Historical damage remains in statements after a reset, while reset-archived damage is excluded from active replacement obligations.
 - Financial running balances, stock locations, repair assignment, damage, replacement orders and loss activity share the same report data as the PDF. Dates and accounting signs are explicit; no wage, replacement value or actual physical work-start time is invented.
+
+## Owner profile lifecycle
+- Company and artisan profiles support Active, Paused, Archived and Deleted (history kept). Only Owner can change status or restore; a reason and actor audit are retained.
+- Delete retains the same master ID, all history, stock, money and statement links. Current lists show Active/Paused; filters expose Archived/Deleted and all historical profiles.
+- Inactive companies cannot receive new intake/opening/replacement-order stock. Inactive artisans cannot receive new work assignments. Existing returns, receipts (including immediate repaint), dispatch and financial settlement remain available; balances are never removed by profile status changes.

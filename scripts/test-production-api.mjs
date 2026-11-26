@@ -7,6 +7,7 @@ const sql=postgres(process.env.SUPABASE_DATABASE_URL||process.env.POSTGRES_URL||
 try{await sql.begin(async tx=>{
  if(!(await tx`select to_regclass('inventory.production_events') as t`)[0].t)await tx.unsafe(await source('../supabase/migrations/20261124204531_production_accounts.sql'));
  if(!(await tx`select to_regclass('inventory.artisan_money') as t`)[0].t)await tx.unsafe(await source('../supabase/migrations/20261126102811_artisan_financial_statements.sql'));
+ if(!(await tx`select 1 from information_schema.columns where table_schema='inventory' and table_name='companies' and column_name='profile_status'`).length)await tx.unsafe(await source('../supabase/migrations/20261126133758_profile_lifecycle_controls.sql'));
  const [owner]=await tx`select id,name,role from inventory.users where role='Admin' and active=1 limit 1`;assert.ok(owner);
  globalThis.__identity={signedIn:true,staff:owner};
  const wrapper=client=>({prepare(query){let n=0;query=query.replace(/\b(FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+(companies|products|artisans|settings|users)\b/gi,'$1 inventory.$2').replace(/\?/g,()=>'$'+(++n));const stmt=args=>({bind:(...args)=>stmt(args),first:async()=>((await client.unsafe(query,args))[0]||null),all:async()=>({results:await client.unsafe(query,args)}),run:async()=>client.unsafe(query,args)});return stmt([]);},transaction:fn=>client.savepoint(inner=>fn(wrapper(inner)))});
@@ -22,6 +23,39 @@ try{await sql.begin(async tx=>{
  const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});const account=(stage,arts='',work='',artisan='',pool='normal',co=company)=>({company:co,product,pool,stage,arts,work,artisan});
  const send=async(c,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/production',{method:'POST',headers:{'Content-Type':'application/json',origin:'https://im.tarafabbs.com'},body:JSON.stringify({date,...c,key})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const q=async a=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(a)}`)[0]?.quantity||0);
+ if(process.env.IMS_TEST_PROFILES_ONLY==='1'){
+  const statusSource=(await source('../app/api/production/profile-status/route.ts')).replace("import {db} from '@/lib/database';",'const db=globalThis.__db;').replace("import {inventorySession} from '@/lib/inventory-identity';",'const inventorySession=async()=>globalThis.__identity;').replace("import {isOwner,roleLabel} from '@/lib/rules';",'const {isOwner,roleLabel}=globalThis.__rules;');
+  const statusApi=await load(statusSource),change=async(kind,id,status,expected=200,key=randomUUID(),reason='Test profile status')=>{const r=await statusApi.POST(new Request('https://im.tarafabbs.com/api/production/profile-status',{method:'POST',headers:{origin:'https://im.tarafabbs.com'},body:JSON.stringify({kind,id,status,key,reason})}));const body=await r.json();assert.equal(r.status,expected,JSON.stringify(body));checks++;return body;};
+  await send({kind:'receipt',company,lines:[{company,product,quantity:50}]});
+  await send({kind:'issue',company,lines:[{source:account('raw'),quantity:20,artisan:artist,artwork:'Free Hand Paint'}]});
+  await send({kind:'receive',company,amount:100,lines:[{source:account('artist','','Free Hand Paint',artist),quantity:5}]});
+  await send({kind:'dispatch',company,amount:200,lines:[{source:account('ready','Free Hand Paint'),quantity:3}]});
+  const state=async()=>JSON.stringify({stock:await tx`select * from inventory.production_balances where company=${company} order by key`,events:await tx`select * from inventory.production_events where company=${company} order by id`,companyMoney:await tx`select * from inventory.production_money where company=${company} order by id`,artisanMoney:await tx`select * from inventory.artisan_money where artisan=${artist} order by id`});
+  const before=await state(),statusKey=randomUUID();await change('company',company,'paused',200,statusKey);await change('company',company,'paused',200,statusKey);await change('artisan',artist,'paused');assert.equal(await state(),before);
+  assert.equal(Number((await tx`select count(*) as n from inventory.change_audit where after_data->>'id'=${company} and action='production_profile_status'`)[0].n),1);
+  await change('company',company,'archived',409,statusKey);await change('product',product,'deleted',400);await change('company',company,'unknown',400);await change('company',company,'archived',400,randomUUID(),'');
+  for(const role of ['Management','Office Manager','Supervisor','Office Staff','Viewer']){globalThis.__identity={signedIn:true,staff:{...owner,role}};await change('company',company,'active',403);}globalThis.__identity={signedIn:true,staff:owner};
+  await send({kind:'receipt',company,lines:[{company,product,quantity:1}]},400);
+  await send({kind:'issue',company,lines:[{source:account('raw'),quantity:1,artisan:artist,artwork:'Free Hand Paint'}]},400);
+  await send({kind:'receipt',company,correctionKind:'payment',lines:[{company,product,quantity:1}]},400);
+  await send({kind:'issue',company,correctionKind:'receive',lines:[{source:account('raw'),quantity:1,artisan:artist,artwork:'Free Hand Paint'}]},400);
+  await send({kind:'receive',company,amount:20,lines:[{source:account('artist','','Free Hand Paint',artist),quantity:2,disputeQuantity:1}]});
+  assert.equal(await q(account('reprint','','Free Hand Paint',artist)),1);
+  await change('company',company,'archived');await change('artisan',artist,'deleted');
+  const archivedBefore=await state();await change('company',company,'deleted');assert.equal(await state(),archivedBefore);
+  globalThis.__artisanMoney=await load((await source('../lib/artisan-money.ts')).replace(/import \{ paise \} from '\.\/production';/,'const {paise}=globalThis.__prod;'));
+  const moneySource=(await source('../app/api/production/artisan-money/route.ts')).replace("import {db} from '@/lib/database';",'const db=globalThis.__db;').replace("import {inventorySession} from '@/lib/inventory-identity';",'const inventorySession=async()=>globalThis.__identity;').replace("import {isManagement,isOfficeRole,isOwner,roleLabel} from '@/lib/rules';",'const {isManagement,isOfficeRole,isOwner,roleLabel}=globalThis.__rules;').replace(/import \{[^;]+\} from '@\/lib\/artisan-money';/,'const {artisanMoneyAmount}=globalThis.__artisanMoney;');
+  const paid=await (await load(moneySource)).POST(new Request('https://im.tarafabbs.com/api/production/artisan-money',{method:'POST',headers:{origin:'https://im.tarafabbs.com'},body:JSON.stringify({key:randomUUID(),artisan:artist,kind:'payment',date,amount:25})}));assert.equal(paid.status,200,JSON.stringify(await paid.json()));checks++;
+  assert.equal(Number((await tx`select sum(amount) as due from inventory.artisan_money where artisan=${artist}`)[0].due),9500);
+  await send({kind:'receive',company,lines:[{source:account('reprint','','Free Hand Paint',artist),quantity:1}]});
+  await send({kind:'dispatch',company,amount:10,lines:[{source:account('ready','Free Hand Paint'),quantity:1}]});await send({kind:'payment',company,amount:50});
+  const snap=await (await GET(new Request('https://im.tarafabbs.com/api/production'))).json();assert.equal(snap.companies.find(c=>c.id===company).profile_status,'deleted');assert.equal(snap.artisans.find(a=>a.id===artist).profile_status,'deleted');
+  await change('company',company,'active');await change('artisan',artist,'active');
+  await send({kind:'receipt',company,lines:[{company,product,quantity:1}]});
+  await send({kind:'issue',company,lines:[{source:account('raw'),quantity:1,artisan:artist,artwork:'Free Hand Paint'}]});
+  const [audit]=await tx`select actor_id,after_data from inventory.change_audit where after_data->>'id'=${artist} and after_data->>'profile_status'='deleted'`;assert.equal(audit.actor_id,owner.id);assert.equal(audit.after_data.reason,'Test profile status');
+  console.log('PASS: Owner profile lifecycle API/PostgreSQL:',checks,'checks; pause/archive/delete/restore, denied non-owners, audit + retry idempotency, history/stock/finance unchanged by status, blocked new intake/work, inactive receipt/repaint/dispatch/payment settlement and preserved profile IDs. Fixtures rolled back.');throw Error('ROLLBACK_TEST');
+ }
  if(process.env.IMS_TEST_ENTRY_ONLY==='1'){
   const vendor=randomUUID(),officeProduct=randomUUID();
   await tx`insert into inventory.companies(id,name,prefix,ownership,office_only) values(${vendor},'Test Office Vendor','TEV','EXTERNAL',1)`;

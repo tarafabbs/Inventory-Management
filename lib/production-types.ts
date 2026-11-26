@@ -3,6 +3,7 @@ export type Master = {
     id: string;
     name: string;
     active: number;
+    profile_status?: 'active' | 'paused' | 'archived' | 'deleted';
     ownership?: string;
     office_only?: number;
     contact?: string;

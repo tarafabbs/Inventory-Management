@@ -83,7 +83,7 @@ export default function ArtisanReceive({ data, busy, save }: {
             {retryCommand && <p className="prod-preview">{tr('Check the previous save before starting another receipt.')} <button type="button" onClick={() => void submit()}>{tr('Check / retry previous save')}</button></p>}
             <label>{tr('Select artisan first')}<select required value={draft.artisan} onChange={e => change({ ...empty(), artisan: e.target.value })}>
                 <option value="">{tr('Select artist')}</option>
-                {data.artisans.map(a => <option key={a.id} value={a.id}>{a.name} · {total(artisanPending(data.balances, a.id))} {tr('pcs pending')}</option>)}
+                {data.artisans.filter(a=>a.active||total(artisanPending(data.balances,a.id))>0||a.id===draft.artisan).map(a => <option key={a.id} value={a.id}>{a.name} · {total(artisanPending(data.balances, a.id))} {tr('pcs pending')}</option>)}
             </select></label>
             {!draft.artisan && <p className="prod-preview">{tr('Choose an artisan to see their companies, categories and pending quantities.')}</p>}
             {!!draft.artisan && <>

@@ -157,7 +157,8 @@ export async function POST(request: Request) {
             }
             else
                 p = planCommand(c, balances, documents);
-            const checked = new Map(balances.map(b => [accountKey(b), b.quantity]));
+            const existingQuantities = new Map(balances.map(b => [accountKey(b), b.quantity]));
+            const checked = new Map(existingQuantities);
             for (const d of p.deltas) {
                 const k = accountKey(d);
                 checked.set(k, (checked.get(k) || 0) + d.quantity);
@@ -185,6 +186,7 @@ export async function POST(request: Request) {
             }
             else if (opening && c.date < opening.value)
                 throw reject('Entry date precedes opening balance.');
+            const effectiveKind=c.kind==='correct'?(eventPayload.correctionKind||c.kind):c.kind;
             for (const d of p.deltas) {
                 const company=masters.companies[d.company], product=masters.products[d.product];
                 if (!company || !product)
@@ -193,11 +195,13 @@ export async function POST(request: Request) {
                     throw reject('This company is an Office-only vendor. Choose a Workshop company for New Entry. Your product lines are kept when you change company.');
                 if (company.office_only !== product.office_only) throw reject('Choose a category belonging to the same workshop / Office inventory.');
                 if (d.stage.startsWith('office_') && company.ownership !== 'OWN' && !company.office_only) throw reject('Only Own Product or an Office vendor belongs in Office stock.');
-                if (d.quantity > 0 && (!company.active || !product.active))
-                    throw reject('Reactivate company/category before adding stock.');
+                const grows=(checked.get(accountKey(d))||0)>(existingQuantities.get(accountKey(d))||0);
+                if (d.quantity > 0 && !product.active) throw reject('Reactivate company/category before adding stock.');
+                if (grows && !company.active && ['receipt','office_vendor','opening','order_receive'].includes(effectiveKind))
+                    throw reject('Restore this company before adding new stock. Existing stock and payments can still be settled.');
                 if (d.artisan) {
                     const artist=masters.artisans[d.artisan];
-                    if (!artist || d.quantity > 0 && !artist.active)
+                    if (!artist || grows && !artist.active && !['receive','return_receive','delete','reset','undo_reset'].includes(effectiveKind))
                         throw reject('Choose an active artist.');
                 }
                 if (['office_send', 'office_receive', 'office_return', 'office_factory_receive'].includes(c.kind) && company.ownership !== 'OWN')
@@ -235,7 +239,7 @@ export async function POST(request: Request) {
             const id = randomUUID();
             // Effective accounting snapshots are server-derived, never accepted
             // from a client payload and later trusted during a correction.
-            if(c.kind!=='correct')eventPayload={...eventPayload,effectiveDelta:p.deltas,effectiveMoney:p.money,effectiveArtisanMoney:p.artisanMoney||[]};
+            if(c.kind!=='correct')eventPayload={...eventPayload,correctionKind:undefined,effectiveDelta:p.deltas,effectiveMoney:p.money,effectiveArtisanMoney:p.artisanMoney||[]};
             await tx.prepare('INSERT INTO inventory.production_events(id,kind,company,event_date,reference,notes,actor_id,actor,actor_role,payload,delta) VALUES(?::uuid,?,?,?::date,?,?,?,?,?,?::text::jsonb,?::text::jsonb)').bind(id, c.kind, c.company || c.targetCompany || p.deltas[0]?.company || '', c.date, c.reference || '', c.notes || '', u.id, u.name, roleLabel(u.role), JSON.stringify(eventPayload), JSON.stringify(p.deltas)).run();
             // Aggregate net deltas before UPSERT: corrections may reverse and repost the same account.
             const net = new Map<string, Delta>();
