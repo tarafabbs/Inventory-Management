@@ -24,6 +24,50 @@ try{await sql.begin(async tx=>{
  const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});const account=(stage,arts='',work='',artisan='',pool='normal',co=company)=>({company:co,product,pool,stage,arts,work,artisan});
  const send=async(c,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/production',{method:'POST',headers:{'Content-Type':'application/json',origin:'https://im.tarafabbs.com'},body:JSON.stringify({date,...c,key})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const q=async a=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(a)}`)[0]?.quantity||0);
+ if(process.env.IMS_TEST_DIRECT_SALES_ONLY==='1'){
+  if(!(await tx`select to_regclass('inventory.sales_documents') as t`)[0].t)await tx.unsafe(await source('../supabase/migrations/20261126232422_tarafabbs_direct_sales.sql'));
+  globalThis.__salesCore=await load((await source('../lib/direct-sales.ts')).replace("import type { Account, Delta } from './production';",''));
+  globalThis.__salesRead=await load((await source('../lib/sales-read.ts')).replace("import { db } from './database';",'const db=globalThis.__db;').replace(/import \{ blankLayout,[^;]+\} from '\.\/direct-sales';/,'const {blankLayout}=globalThis.__salesCore;'));
+  globalThis.__salesWrite=await load((await source('../lib/sales-write.ts')).replace("import { accountKey, type Account, type Delta } from './production';",'const {accountKey}=globalThis.__prod;').replace("import { isOwner, roleLabel } from './rules';",'const {isOwner,roleLabel}=globalThis.__rules;').replace(/import \{\s*blankLayout[\s\S]+?\} from '\.\/direct-sales';/,'const {blankLayout,calculateSale,cents,dateValue,documentNumber,fiscalYear,gstNumber,netStock,rate,saleStages,seriesFor,units}=globalThis.__salesCore;'));
+  let salesApiSource=await source('../app/api/production/direct-sales/route.ts');salesApiSource=salesApiSource.replace("import { db } from '@/lib/database';",'const db=globalThis.__db;').replace("import { inventorySession } from '@/lib/inventory-identity';",'const inventorySession=async()=>globalThis.__identity;').replace("import { isManagement } from '@/lib/rules';",'const {isManagement}=globalThis.__rules;').replace(/import \{ bookingCount,[^;]+\} from '@\/lib\/sales-read';/,'const {bookingCount,customerReturns,jobAdvances,salesDocument,salesHub,salesStatement}=globalThis.__salesRead;').replace("import { rejectSales, salesMutation } from '@/lib/sales-write';",'const {rejectSales,salesMutation}=globalThis.__salesWrite;');
+  const salesApi=await load(salesApiSource);
+  const postSales=async(v,status=200,key=randomUUID())=>{const response=await salesApi.POST(new Request('https://im.tarafabbs.com/api/production/direct-sales',{method:'POST',headers:{origin:'https://im.tarafabbs.com'},body:JSON.stringify({key,...v})}));const body=await response.json();assert.equal(response.status,status,JSON.stringify(body));checks++;return body;};
+  const getSales=async(view='',params={})=>{const response=await salesApi.GET(new Request('https://im.tarafabbs.com/api/production/direct-sales'+(view?'?'+new URLSearchParams({view,...params}):'')));const body=await response.json();assert.equal(response.status,200,JSON.stringify(body));checks++;return body;};
+  const stock=account('ready','Painted','','','normal',own),raw=account('raw','','','','normal',own);
+  await send({kind:'receipt',company:own,lines:[{company:own,product,quantity:20}]});
+  await tx`insert into inventory.production_balances(key,company,product,pool,stage,artisan,arts,work,quantity) values(${prod.accountKey(stock)},${own},${product},'normal','ready','','Painted','',10)`;
+  const customerId=(await postSales({op:'customer',name:'Retail Example',address:'Sample address',phone:'0123456789'})).id;
+  const productId=(await postSales({op:'product',name:'Test Silk',price:250,hsn:'5007',sku:'S1',stockProduct:product})).id;
+  const catalogueId=(await postSales({op:'product',name:'Gift Box',price:25,sku:'BOX'})).id;
+  assert.equal((await getSales()).products.find(p=>p.id===productId).price,25000);
+  await postSales({op:'opening',customer:customerId,date,amount:100,direction:'due'});
+  const booking=await postSales({op:'document',kind:'booking',customer:customerId,date,lines:[{source:prod.accountKey(stock),quantity:2,unit:250}],received:50,method:'Cash'});
+  assert.equal(await q(stock),10,'Booking must not debit stock');
+  assert.equal((await getSales()).balances.find(x=>x.customer===customerId).due,5000,'Booking advance is a credit on receipt date');
+  const sale={op:'document',kind:'bill',customer:customerId,date,bookingId:booking.id,lines:[{source:prod.accountKey(stock),quantity:2,unit:250},{source:prod.accountKey(raw),quantity:1,unit:100},{product:catalogueId,quantity:2,unit:25}],discount:10,additional:5,received:250,method:'UPI'};
+  const first=await postSales(sale),bill=await getSales('document',{id:first.id});
+  assert.match(first.number,/^S-\d\d-0001$/);assert.equal(bill.total,64500);assert.equal(bill.paid,30000);
+  assert.equal(await q(stock),8);assert.equal(await q(raw),19);
+  assert.equal((await getSales()).balances.find(x=>x.customer===customerId).due,44500);
+  const booked=await getSales('document',{id:booking.id});await postSales({op:'document',id:booking.id,revision:booked.revision,kind:'booking',customer:customerId,date,lines:[{source:prod.accountKey(stock),quantity:2,unit:250}],received:55,method:'Cash'},400);
+  await postSales(sale,400,'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa');
+  const shortage={...sale,bookingId:undefined,lines:[{source:prod.accountKey(stock),quantity:100,unit:250}]};await postSales(shortage,409);assert.equal(await q(stock),8);
+  const gstCustomer=(await postSales({op:'customer',name:'GST Example',address:'GST address',gst:'19AAAAA0000A1Z5'})).id;
+  await postSales({op:'layout',seller:'TaraFabbs',address:'Seller address',gst:'19AAAAA0000A1Z5',phone:'',bank:'',logo:'',signature:'',qr:'',bankImage:''});
+  const gstBill=await postSales({op:'document',kind:'bill',customer:gstCustomer,date,gst:true,gstNumber:'19AAAAA0000A1Z5',address:'GST address',place:'West Bengal',cgst:2.5,sgst:2.5,taxMode:'local',lines:[{source:prod.accountKey(stock),quantity:1,unit:200}],received:0});assert.match(gstBill.number,/^G-\d\d-0001$/);assert.equal((await getSales('document',{id:gstBill.id})).total,21000);
+  const returnOptions=await getSales('returns',{customer:customerId});const sold=returnOptions.find(x=>x.number===first.number&&x.line.source?.stage==='ready');assert.equal(sold.remaining,2);
+  const returned=await postSales({op:'document',kind:'return',customer:customerId,date,lines:[{returnFrom:sold.id,type:'return',quantity:1,unit:200}],received:50,method:'Cash'});assert.equal(await q(stock),8,'One sale and one linked return offset one piece');
+  assert.equal((await getSales()).balances.find(x=>x.customer===customerId).due,29500);
+  await postSales({op:'document',kind:'return',customer:customerId,date,lines:[{returnFrom:sold.id,type:'return',quantity:2,unit:200}],received:0},400);
+  await postSales({op:'void',id:first.id,revision:bill.revision,confirm:true},400);
+  const returnDoc=await getSales('document',{id:returned.id});await postSales({op:'void',id:returnDoc.id,revision:returnDoc.revision,confirm:true});assert.equal(await q(stock),7);
+  await postSales({op:'void',id:first.id,revision:bill.revision,confirm:true});assert.equal(await q(stock),9);assert.equal(await q(raw),20);
+  const finalHub=await getSales();assert.equal(finalHub.balances.find(x=>x.customer===customerId).due,5000,'Cancelled bill keeps cash booking advance as customer credit');
+  const ledger=await getSales('statement',{customer:customerId});assert.ok(ledger.some(x=>x.label.startsWith('Booking advance')&&x.amount===-5000));
+  await postSales({op:'payment',customer:customerId,date,amount:30,direction:'refund',method:'Cash'});assert.equal((await getSales()).balances.find(x=>x.customer===customerId).due,8000);
+  globalThis.__identity={signedIn:true,staff:{...owner,role:'Office Staff'}};const denied=await salesApi.GET(new Request('https://im.tarafabbs.com/api/production/direct-sales'));assert.equal(denied.status,403);checks++;
+  console.log('PASS: Direct Sell migration/API: serials, GST, linked and manual products, stock, booking credit, bill/return, due, refund, edit guards, void, permissions; checks:',checks);throw Error('ROLLBACK_TEST');
+ }
  if(process.env.IMS_TEST_DASHBOARD_ONLY==='1'){
   globalThis.__dashboard=await load(await source('../lib/production-dashboard.ts'));
   const route=(await source('../app/api/production/dashboard/route.ts'))

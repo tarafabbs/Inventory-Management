@@ -4,6 +4,8 @@
 .prod-loading{display:flex;min-height:100dvh;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
 
 .prod .prod-header{top:var(--inventory-language-height,52px)}
+.prod-header .prod-advance{border-color:#ccb6ef;color:#56358d;background:#f2edfb;font-weight:650}
+@media(max-width:760px){.prod-header .prod-advance{font-size:.72rem;padding:5px 7px;min-height:39px}.prod-header .prod-alert{margin-left:auto;min-height:39px}.prod-header{gap:6px}.prod-header .prod-user{display:none}}
 .prod .prod-nav{top:calc(76px + var(--inventory-language-height,52px))}
 @media(max-width:760px){.prod .prod-nav{top:calc(68px + var(--inventory-language-height,52px))}}
 
