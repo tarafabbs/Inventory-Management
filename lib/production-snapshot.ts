@@ -7,7 +7,16 @@ import type {Snapshot} from './production-types';
 export async function productionSnapshot(user:Pick<InventoryUser,'id'|'name'|'role'>, {company='',page=0,office=false}:{company?:string;page?:number;office?:boolean}={}):Promise<Snapshot>{
  const officeScope=office?"AND b.stage IN ('office_pending','office_stock','office_sold','office_return') AND (c.ownership='OWN' OR c.office_only=1)":'';
  const officeEvents=office?"AND (e.kind IN ('office_send','office_receive','office_sell','office_return','office_vendor','vendor_return') OR e.kind='correct' AND e.payload->>'correctionKind'='office_vendor')":'';
- const row=await db.prepare(`WITH stock AS (
+ const row=await db.prepare(`WITH last_reset AS (
+   SELECT r.created_at FROM inventory.production_events r
+   WHERE r.kind='reset' AND NOT EXISTS (
+     SELECT 1 FROM inventory.production_events u
+     WHERE u.kind='undo_reset' AND u.payload->>'document'=r.id::text
+   ) ORDER BY r.created_at DESC LIMIT 1
+ ), current_events AS (
+   SELECT e.* FROM inventory.production_events e
+   WHERE e.created_at>coalesce((SELECT created_at FROM last_reset),'-infinity'::timestamptz)
+ ), stock AS (
    SELECT b.* FROM inventory.production_balances b JOIN companies c ON c.id=b.company WHERE b.quantity>0 ${officeScope}
  ), history AS (
    SELECT e.id,e.kind,e.event_date,e.reference,e.notes,e.actor,e.actor_id,e.actor_role,e.created_at,e.payload,e.delta
@@ -24,7 +33,11 @@ export async function productionSnapshot(user:Pick<InventoryUser,'id'|'name'|'ro
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'active',s.active) ORDER BY s.name) FROM inventory.art_styles s WHERE s.active=1),'[]')"} AS "artStyles",
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(m) FROM (SELECT company,sum(amount)::float8 AS due FROM inventory.production_money GROUP BY company) m),'[]')"} AS money,
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(d ORDER BY d.created_at DESC) FROM inventory.production_documents d WHERE d.voided_at IS NULL),'[]')"} AS documents,
- coalesce((SELECT value FROM settings WHERE key='production_opening_date'),'') AS "openingDate"
+ coalesce(
+   (SELECT min(event_date)::text FROM current_events WHERE kind='opening'),
+   (SELECT (min(event_date)-1)::text FROM current_events
+    WHERE kind NOT IN ('opening','migration','reset','undo_reset') AND delta<>'[]'::jsonb),
+   '') AS "openingDate"
  `).bind(company,company,JSON.stringify([{company}]),page*50).first<Omit<Snapshot,'user'|'more'>>(12_000);
  if(!row)throw new Error('Stock could not be loaded. Please retry.');
  return {...row,user:{id:user.id,name:user.name,role:user.role},more:row.history.length>50,history:row.history.slice(0,50)};

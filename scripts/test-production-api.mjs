@@ -24,6 +24,25 @@ try{await sql.begin(async tx=>{
  const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});const account=(stage,arts='',work='',artisan='',pool='normal',co=company)=>({company:co,product,pool,stage,arts,work,artisan});
  const send=async(c,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/production',{method:'POST',headers:{'Content-Type':'application/json',origin:'https://im.tarafabbs.com'},body:JSON.stringify({date,...c,key})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const q=async a=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(a)}`)[0]?.quantity||0);
+ if(process.env.IMS_TEST_RESET_OPENING_ONLY==='1'){
+  const yesterday=new Date(Date.parse(date+'T00:00:00Z')-86400000).toISOString().slice(0,10);
+  const older=new Date(Date.parse(date+'T00:00:00Z')-4*86400000).toISOString().slice(0,10);
+  const raw=account('raw'),ownRaw=account('raw','','','','normal',own);
+  await tx`insert into inventory.production_events(id,kind,company,event_date,actor_id,actor,actor_role,payload,delta) values(${randomUUID()},'receipt',${company},${older},${owner.id},${owner.name},'Owner','{}'::jsonb,${JSON.stringify([{...raw,quantity:5}])}::text::jsonb)`;
+  await tx`insert into inventory.settings(key,value) values('production_opening_date',${older}) on conflict(key) do update set value=excluded.value`;
+  await tx`insert into inventory.production_events(id,kind,company,event_date,actor_id,actor,actor_role,payload,delta) values(${randomUUID()},'reset',${company},${yesterday},${owner.id},${owner.name},'Owner','{}'::jsonb,'[]'::jsonb)`;
+  await send({kind:'receipt',company:own,lines:[{company:own,product,quantity:2}]});
+  const snapshot=await (await GET(new Request('https://im.tarafabbs.com/api/production'))).json();
+  assert.equal(snapshot.openingDate,yesterday,'Suggest the day before the first post-reset stock movement');
+  const baseline={kind:'opening',confirm:true,date:yesterday,company,lines:[{source:raw,quantity:3}]};
+  await send({...baseline,date},400);
+  await send(baseline);
+  assert.equal(await q(raw),3);
+  await send(baseline,400);
+  assert.equal((await (await GET(new Request('https://im.tarafabbs.com/api/production'))).json()).openingDate,yesterday);
+  assert.equal(await q(ownRaw),2);
+  console.log('PASS: reset-scoped opening ignores earlier history and stale settings, suggests prior day, rejects late and duplicate opening; fixtures rolled back. Checks:',checks);throw Error('ROLLBACK_TEST');
+ }
  if(process.env.IMS_TEST_DIRECT_SALES_ONLY==='1'){
   if(!(await tx`select to_regclass('inventory.sales_documents') as t`)[0].t)await tx.unsafe(await source('../supabase/migrations/20261126232422_tarafabbs_direct_sales.sql'));
   globalThis.__salesCore=await load((await source('../lib/direct-sales.ts')).replace("import type { Account, Delta } from './production';",''));

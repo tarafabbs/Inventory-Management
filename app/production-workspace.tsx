@@ -280,7 +280,7 @@ function Entry({ kind, data, company, busy, save, master, onAction, initialSourc
         sessionStorage.removeItem(draftName);
     }
     catch (e) {
-        setError((e as Error).message + ' Retry this entry to check or complete saving.');
+        setError((e as Error).message);
     }
     finally {
         pending.current = false;

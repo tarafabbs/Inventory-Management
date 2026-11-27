@@ -175,17 +175,34 @@ export async function POST(request: Request) {
             }
             if (p.deltas.some(d => d.artisan && !d.work))
                 throw reject('Artist-held stock needs an artwork.');
-            const opening = await tx.prepare("SELECT value FROM settings WHERE key='production_opening_date'").first<{
-                value: string;
+            // An opening belongs to the current stock cycle. Older resets and
+            // their movements must not constrain the new cycle's baseline.
+            const cycle = await tx.prepare(`WITH last_reset AS (
+                SELECT r.created_at FROM inventory.production_events r
+                WHERE r.kind='reset' AND NOT EXISTS (
+                    SELECT 1 FROM inventory.production_events u
+                    WHERE u.kind='undo_reset' AND u.payload->>'document'=r.id::text
+                ) ORDER BY r.created_at DESC LIMIT 1
+            ), current_events AS (
+                SELECT e.* FROM inventory.production_events e
+                WHERE e.created_at>coalesce((SELECT created_at FROM last_reset),'-infinity'::timestamptz)
+            ) SELECT
+                (SELECT min(event_date)::text FROM current_events WHERE kind='opening') AS "openingDate",
+                (SELECT min(event_date)::text FROM current_events
+                 WHERE kind NOT IN ('opening','migration','reset','undo_reset')
+                   AND delta<>'[]'::jsonb) AS "firstMovementDate",
+                (SELECT created_at FROM last_reset) AS "resetAt"`).first<{
+                openingDate: string | null;
+                firstMovementDate: string | null;
+                resetAt: Date | null;
             }>();
             if (c.kind === 'opening') {
-                if (opening && opening.value !== c.date)
+                if (cycle?.openingDate && cycle.openingDate !== c.date)
                     throw reject('Use the same opening date for all opening balances.');
-                if (await tx.prepare("SELECT id FROM inventory.production_events WHERE kind NOT IN ('opening','migration','correct','delete') AND event_date < ?::date LIMIT 1").bind(c.date).first())
-                    throw reject('Opening date must precede existing entries.');
-                await tx.prepare("INSERT INTO settings(key,value) VALUES('production_opening_date',?) ON CONFLICT(key) DO NOTHING").bind(c.date).run();
+                if (cycle?.firstMovementDate && c.date >= cycle.firstMovementDate)
+                    throw reject(`Opening date must be before the first stock movement on ${cycle.firstMovementDate}.`);
             }
-            else if (opening && c.date < opening.value)
+            else if (cycle?.openingDate && c.date < cycle.openingDate)
                 throw reject('Entry date precedes opening balance.');
             const effectiveKind=c.kind==='correct'?(eventPayload.correctionKind||c.kind):c.kind;
             for (const d of p.deltas) {
@@ -220,8 +237,14 @@ export async function POST(request: Request) {
                 for (const d of p.deltas) {
                     if (balances.some(b => accountKey(b) === accountKey(d) && b.quantity !== 0))
                         throw reject('Stock already exists. Use correction instead of another opening.');
-                    if (await tx.prepare("SELECT id FROM inventory.production_events WHERE kind NOT IN ('opening','migration') AND delta @> ?::text::jsonb LIMIT 1").bind(JSON.stringify([{ company: d.company, product: d.product }])).first())
-                        throw reject('Enter opening before regular movements for this category.');
+                    if (await tx.prepare(`SELECT id FROM inventory.production_events
+                        WHERE kind='opening' AND created_at>coalesce(?::timestamptz,'-infinity'::timestamptz)
+                          AND delta @> ?::text::jsonb LIMIT 1`)
+                        .bind(cycle?.resetAt || null, JSON.stringify([{
+                            company:d.company, product:d.product, pool:d.pool, stage:d.stage,
+                            artisan:d.artisan, arts:d.arts, work:d.work,
+                        }])).first())
+                        throw reject('Opening already exists for this stock location. Use correction instead.');
                 }
             }
             for (const m of p.money) {
