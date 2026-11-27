@@ -1,5 +1,7 @@
-export const roles = ['Viewer','Receiving','Issue','Inspection','Office Staff','Assistant Manager','Supervisor','Office Manager','Management','Admin'];
+export const roles = ['Viewer','Receiving','Issue','Inspection','Office Staff','Assistant Manager','Supervisor','Office Manager','Production Manager','Management','Admin'];
 export const officeRoles = ['Office Staff','Assistant Manager','Office Manager'];
+export const outletRoles = [...officeRoles,'Production Manager'];
+export const isOutletRole = (role:string) => outletRoles.includes(role);
 export const workshopStaffRoles = ['Receiving','Issue','Inspection','Supervisor'];
 export const officeAssignableRoles = ['Office Staff','Assistant Manager'];
 export const isOfficeRole = (role:string) => officeRoles.includes(role);
@@ -29,6 +31,7 @@ const rolePrivileges:Record<string,ReadonlySet<string>>={
  'Office Staff':new Set(officeShared),
  'Assistant Manager':new Set([...officeShared,'officeEntry','officeEdit','officeMaster']),
  'Office Manager':new Set([...officeShared,'officeEntry','officeEdit','officeMaster']),
+ 'Production Manager':new Set(['read','handoff','return','officeReturn','postFinish']),
  Management:new Set(privileges.filter(privilege => !['user','adminData'].includes(privilege))),
  Admin:new Set(privileges)
 };

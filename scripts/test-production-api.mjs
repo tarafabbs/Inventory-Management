@@ -24,6 +24,23 @@ try{await sql.begin(async tx=>{
  const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});const account=(stage,arts='',work='',artisan='',pool='normal',co=company)=>({company:co,product,pool,stage,arts,work,artisan});
  const send=async(c,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/production',{method:'POST',headers:{'Content-Type':'application/json',origin:'https://im.tarafabbs.com'},body:JSON.stringify({date,...c,key})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const q=async a=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(a)}`)[0]?.quantity||0);
+ if(process.env.IMS_TEST_OFFICE_TRANSFER_ONLY==='1'){
+  const ready=account('ready','','','','normal',own),officeStock=account('office_stock','','','','normal',own),hold=account('hold','','','','normal',own);
+  const officeUser={id:randomUUID(),name:'Test Office Staff',role:'Office Staff'};
+  await tx`insert into inventory.users(id,email,name,role,active,created_at) values(${officeUser.id},${officeUser.id+'@example.test'},${officeUser.name},${officeUser.role},1,${new Date().toISOString()})`;
+  await tx`insert into inventory.production_balances(key,company,product,pool,stage,artisan,arts,work,quantity) values(${prod.accountKey(ready)},${own},${product},'normal','ready','','','',8)`;
+  globalThis.__identity={signedIn:true,staff:officeUser};
+  const office=await (await GET(new Request('https://im.tarafabbs.com/api/production?view=office'))).json();
+  assert.deepEqual(office.balances.filter(b=>b.stage==='ready').map(b=>b.quantity),[8]);
+  await send({kind:'office_receive',company:own,lines:[{source:ready,quantity:6}]});
+  assert.equal(await q(ready),2);assert.equal(await q(officeStock),6);
+  await send({kind:'office_return',company:own,lines:[{source:officeStock,quantity:2}]});
+  assert.equal(await q(ready),4);assert.equal(await q(officeStock),4);
+  await send({kind:'office_dispute_return',company:own,notes:'Colour mismatch',lines:[{source:officeStock,quantity:1}]});
+  assert.equal(await q(hold),1);assert.equal(await q(officeStock),3);
+  await send({kind:'office_receive',company,lines:[{source:account('raw'),quantity:1}]},400);
+  console.log('PASS: office pulls own ready stock; fresh return restores ready; disputed return enters factory hold; other company blocked. Checks:',checks);throw Error('ROLLBACK_TEST');
+ }
  if(process.env.IMS_TEST_RESET_OPENING_ONLY==='1'){
   const yesterday=new Date(Date.parse(date+'T00:00:00Z')-86400000).toISOString().slice(0,10);
   const older=new Date(Date.parse(date+'T00:00:00Z')-4*86400000).toISOString().slice(0,10);

@@ -16,7 +16,7 @@ export async function GET(request: Request) {
         const q = new URL(request.url).searchParams;
         const page = Math.max(0, Math.min(10000, Number(q.get('page')) || 0));
         const company = q.get('company') || '';
-        const office = isOfficeRole(u.role) || (isManagement(u.role) && q.get('view') === 'office');
+        const office = isOfficeRole(u.role) || u.role==='Production Manager' || (isManagement(u.role) && q.get('view') === 'office');
         return reply(await productionSnapshot(u,{company,page,office}));
     }
     catch (e) {
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
             throw reject('Reload this form.');
         if (!actions[c.kind] && !['correct', 'delete', 'reset', 'undo_reset'].includes(c.kind))
             throw reject('Choose action.');
-        if (isOfficeRole(u.role) && !officeKinds.has(c.kind))
+        if (isOfficeRole(u.role) && !officeKinds.has(c.kind) && c.kind!=='office_dispute_return')
             throw reject('Office access only.', 403);
         if (['delete', 'reset', 'undo_reset'].includes(c.kind) ? !isOwner(u.role) : c.kind === 'correct' ? !permitted(u.role, isOfficeRole(u.role)?'officeEdit':'handoff') : !permitted(u.role, actions[c.kind].permission))
             throw reject('Your access does not permit this action.', 403);
@@ -212,6 +212,8 @@ export async function POST(request: Request) {
                 if (c.kind === 'receipt' && company.office_only)
                     throw reject('This company is an Office-only vendor. Choose a Workshop company for New Entry. Your product lines are kept when you change company.');
                 if (company.office_only !== product.office_only) throw reject('Choose a category belonging to the same workshop / Office inventory.');
+                if (u.role==='Production Manager' && (company.ownership!=='OWN'||company.office_only||product.office_only))
+                    throw reject('Production Manager may handle TaraFabbs Own Product stock only.',403);
                 if (d.stage.startsWith('office_') && company.ownership !== 'OWN' && !company.office_only) throw reject('Only Own Product or an Office vendor belongs in Office stock.');
                 const grows=(checked.get(accountKey(d))||0)>(existingQuantities.get(accountKey(d))||0);
                 if (d.quantity > 0 && !product.active) throw reject('Reactivate company/category before adding stock.');
@@ -226,8 +228,14 @@ export async function POST(request: Request) {
                     throw reject('Only Own Product uses workshop / Office transfers.');
                 if (['office_vendor', 'vendor_return'].includes(c.kind) && (!company.office_only || !product.office_only || company.ownership === 'OWN'))
                     throw reject('Choose outside vendor and Office category.');
-                if (isOfficeRole(u.role) && (!d.stage.startsWith('office_') || (company.ownership !== 'OWN' && !company.office_only)))
+                if (isOfficeRole(u.role) &&
+                    !(company.ownership === 'OWN' && !company.office_only && !product.office_only &&
+                      (d.stage.startsWith('office_') || ['office_receive','office_return','office_dispute_return'].includes(c.kind) && ['ready','hold'].includes(d.stage))) &&
+                    !(company.office_only && d.stage.startsWith('office_')))
                     throw reject('This stock is outside Office access.', 403);
+                if (['office_receive','office_return','office_dispute_return'].includes(c.kind) &&
+                    (company.ownership !== 'OWN' || company.office_only || product.office_only))
+                    throw reject('Office transfer requires TaraFabbs Own Product stock.');
                 if (c.kind === 'replacement' && d.quantity < 0 && (company.ownership !== 'OWN' || company.office_only))
                     throw reject('Replacement source must be TaraFabbs Own workshop stock.');
             }

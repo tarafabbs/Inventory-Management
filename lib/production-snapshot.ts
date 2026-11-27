@@ -5,8 +5,8 @@ import type {Snapshot} from './production-types';
 // One query avoids concurrent unnamed prepared statements through the pooler and
 // provides a consistent snapshot without eight independent connection round trips.
 export async function productionSnapshot(user:Pick<InventoryUser,'id'|'name'|'role'>, {company='',page=0,office=false}:{company?:string;page?:number;office?:boolean}={}):Promise<Snapshot>{
- const officeScope=office?"AND b.stage IN ('office_pending','office_stock','office_sold','office_return') AND (c.ownership='OWN' OR c.office_only=1)":'';
- const officeEvents=office?"AND (e.kind IN ('office_send','office_receive','office_sell','office_return','office_vendor','vendor_return') OR e.kind='correct' AND e.payload->>'correctionKind'='office_vendor')":'';
+ const officeScope=office?"AND c.ownership='OWN' AND c.office_only=0 AND b.stage IN ('raw','ready','hold','artist','reprint','office_pending','office_stock','office_return')":'';
+ const officeEvents=office?"AND (e.kind IN ('office_send','office_receive','office_sell','office_return','office_dispute_return','office_vendor','vendor_return') OR e.kind='correct' AND e.payload->>'correctionKind'='office_vendor')":'';
  const row=await db.prepare(`WITH last_reset AS (
    SELECT r.created_at FROM inventory.production_events r
    WHERE r.kind='reset' AND NOT EXISTS (
@@ -26,10 +26,10 @@ export async function productionSnapshot(user:Pick<InventoryUser,'id'|'name'|'ro
  coalesce((SELECT jsonb_agg(s ORDER BY s.company,s.product,s.stage) FROM stock s),'[]') AS balances,
  coalesce((SELECT jsonb_agg(h ORDER BY h.created_at DESC,h.id DESC) FROM history h),'[]') AS history,
  coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.id,'name',c.name,'active',c.active,'profile_status',c.profile_status,'ownership',c.ownership,'office_only',c.office_only,'contact',c.contact,'address',c.address,'notes',c.notes) ORDER BY c.name)
-   FROM companies c ${office?"WHERE c.ownership='OWN' OR c.office_only=1":''}),'[]') AS companies,
+   FROM companies c ${office?"WHERE c.ownership='OWN' AND c.office_only=0":''}),'[]') AS companies,
  coalesce((SELECT jsonb_agg(jsonb_build_object('id',p.id,'name',p.name,'active',p.active,'office_only',p.office_only) ORDER BY p.name)
-   FROM products p ${office?"WHERE p.office_only=1 OR p.id IN (SELECT product FROM stock)":''}),'[]') AS products,
- ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'active',a.active,'profile_status',a.profile_status,'work_type',a.work_type,'work_description',a.work_description,'work_types',a.work_types,'contact',a.contact,'address',a.address) ORDER BY a.name) FROM artisans a),'[]')"} AS artisans,
+   FROM products p ${office?"WHERE p.id IN (SELECT product FROM stock)":''}),'[]') AS products,
+ coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.id,'name',a.name,'active',a.active,'profile_status',a.profile_status,'work_type',a.work_type,'work_description',a.work_description,'work_types',a.work_types,'contact',a.contact,'address',a.address) ORDER BY a.name) FROM artisans a),'[]') AS artisans,
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.name,'active',s.active) ORDER BY s.name) FROM inventory.art_styles s WHERE s.active=1),'[]')"} AS "artStyles",
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(m) FROM (SELECT company,sum(amount)::float8 AS due FROM inventory.production_money GROUP BY company) m),'[]')"} AS money,
  ${office?"'[]'::jsonb":"coalesce((SELECT jsonb_agg(d ORDER BY d.created_at DESC) FROM inventory.production_documents d WHERE d.voided_at IS NULL),'[]')"} AS documents,

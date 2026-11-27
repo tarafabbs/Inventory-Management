@@ -104,7 +104,7 @@ export const actions: Record<string, {
     dispute: { label: 'Identify Factory Dispute', permission: 'dispute' }, reprint: { label: 'Send Internal Reprint', permission: 'reprintOut' }, damage: { label: 'Total Damage', permission: 'dispute' },
     dispatch: { label: 'Bill & Dispatch', permission: 'postFinish' }, company_return: { label: 'Receive Company Return', permission: 'postFinish' }, return_send: { label: 'Company Return · Artist Send', permission: 'reprintOut' }, return_receive: { label: 'Company Return · Artist Receive', permission: 'reprintReceive' },
     opening: { label: 'Opening Balance', permission: 'manageData' }, payment: { label: 'Company Payment', permission: 'manageData' }, replacement: { label: 'Replacement from Own Stock', permission: 'manageData' }, order: { label: 'Order from Outside', permission: 'manageData' }, order_receive: { label: 'Receive Replacement Order', permission: 'manageData' }, settle: { label: 'Damage Settlement', permission: 'manageData' },
-    office_send: { label: 'Send Own Product to Office', permission: 'postFinish' }, office_receive: { label: 'Receive Own Product in Office', permission: 'officeReceive' }, office_vendor: { label: 'Outside Vendor Receipt', permission: 'officeEntry' }, office_sell: { label: 'Office Sale', permission: 'officeSell' }, office_return: { label: 'Return to Workshop', permission: 'officeReturn' }, office_factory_receive: { label: 'Receive Office Return', permission: 'postFinish' }, vendor_return: { label: 'Return to Outside Vendor', permission: 'officeEntry' }, stock_count: { label: 'Physical Stock Correction', permission: 'adjust' },
+    office_send: { label: 'Send Own Product to Office', permission: 'postFinish' }, office_receive: { label: 'Receive Item at Office', permission: 'officeReceive' }, office_vendor: { label: 'Outside Vendor Receipt', permission: 'officeEntry' }, office_sell: { label: 'Office Sale', permission: 'officeSell' }, office_return: { label: 'Return Fresh Item to Factory', permission: 'officeReturn' }, office_dispute_return: { label: 'Dispute Return to Factory', permission: 'officeReturn' }, office_factory_receive: { label: 'Receive Office Return', permission: 'postFinish' }, vendor_return: { label: 'Return to Outside Vendor', permission: 'officeEntry' }, stock_count: { label: 'Physical Stock Correction', permission: 'adjust' },
 };
 export function planCommand(c: Command, balances: Balance[], documents: Document[] = []): Plan {
     if (!actions[c.kind])
@@ -237,7 +237,7 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
                 move(a, { ...a, stage: 'office_pending' }, n);
                 break;
             case 'office_receive':
-                a = source(l, ['office_pending']);
+                a = source(l, ['ready', 'office_pending'], 'normal');
                 move(a, { ...a, stage: 'office_stock' }, n);
                 break;
             case 'office_vendor':
@@ -248,8 +248,13 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
                 move(a, { ...a, stage: 'office_sold' }, n);
                 break;
             case 'office_return':
-                a = source(l, ['office_stock', 'office_sold']);
-                move(a, { ...a, stage: 'office_return' }, n);
+                a = source(l, ['office_stock'], 'normal');
+                move(a, { ...a, stage: 'ready' }, n);
+                break;
+            case 'office_dispute_return':
+                if (!c.notes?.trim()) throw new Error('Describe the office dispute.');
+                a = source(l, ['office_stock'], 'normal');
+                move(a, { ...a, stage: 'hold' }, n);
                 break;
             case 'office_factory_receive':
                 a = source(l, ['office_return']);
