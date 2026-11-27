@@ -95,7 +95,14 @@ export default function ProductionWorkspace({ office = false,initialData,initial
     const titles: Record<string, string> = { home: 'Home', statements: 'Reports & Statements', performance: 'Performance', companies: 'Companies', 'own-products':'TaraFabbs Own Product', artists: 'Artisans', 'company-return': 'Company Return', dispatch: 'Dispatch Done', 'factory-disputes': 'Factory Disputes', history: 'History', opening: 'Opening Balance', 'stock-check': 'Stock Check', access: 'Staff Access', 'data-control': 'Owner Data Control' };
     const companyData = data.companies.find(c => c.id === company);
     const matchesProfile=(p:Master)=>profilesView==='all'||(profilesView==='current'?['active','paused'].includes(profileStatus(p)):profileStatus(p)===profilesView);
-    return <div className="prod">
+    return <div className={isManagement(data.user.role) ? 'prod prod-with-inventory-switch' : 'prod'}>
+ {isManagement(data.user.role) && <nav className="prod-inventory-switch" aria-label={tr('Inventory')}>
+  <span>{tr('Inventory')}</span>
+  <div role="group" aria-label={tr('Inventory')}>
+   <a href="/" aria-current={!office ? 'page' : undefined}>{tr('Workshop Inventory')}</a>
+   <a href="/?view=Office" aria-current={office ? 'page' : undefined}>{tr('Office Inventory')}</a>
+  </div>
+ </nav>}
  <header className="prod-header"><button aria-label={tr("Open menu")} aria-expanded={menu} onClick={() => setMenu(!menu)}>☰</button><div><strong>IMS TARA MAA</strong><small>{office ? tr("Office Inventory") : tr("Workshop Stock")}</small></div><button className="prod-alert" onClick={() => go('issues')}>{tr("Fix Issues ·")} {(attention.length + outstanding.length)}</button>{!office&&isManagement(data.user.role)&&<button className="prod-advance" onClick={()=>{setSalesTab('bookings');setSalesRequest(n=>n+1);go('own-products');}}>{tr('Advance Orders')}</button>}<span className="prod-user">{data.user.name} · {data.user.role === 'Admin' ? tr("Owner") : tr(data.user.role)}</span></header>
  <aside className={menu ? 'prod-nav open' : 'prod-nav'} aria-label={tr("Main navigation")}>{nav.map(s => <button key={s} aria-current={screen === s ? 'page' : undefined} onClick={() => { if (s === 'opening') {
         start('opening');
@@ -105,7 +112,7 @@ export default function ProductionWorkspace({ office = false,initialData,initial
     }
     else if(s==='own-products'){setSalesTab('stock');setSalesRequest(n=>n+1);go(s);}
     else
-        go(s); }}>{tr(titles[s])}</button>)}<button onClick={() => start(office ? 'office_receive' : 'receipt')}>{tr("＋ New Entry")}</button><button onClick={() => go('movement')}>{tr("Stock Movement")}</button>{isManagement(data.user.role) && <a href={office ? '/' : '/?view=Office'}>{office ? tr("Workshop") : tr("Office")}  {tr("Inventory")}</a>}<button onClick={() => go('catalog')}>{tr("Manage Profiles")}</button><a href="/archive">{tr("Previous History (read only)")}</a><SignOutButton /></aside>
+        go(s); }}>{tr(titles[s])}</button>)}<button onClick={() => start(office ? 'office_receive' : 'receipt')}>{tr("＋ New Entry")}</button><button onClick={() => go('movement')}>{tr("Stock Movement")}</button><button onClick={() => go('catalog')}>{tr("Manage Profiles")}</button><a href="/archive">{tr("Previous History (read only)")}</a><SignOutButton /></aside>
  <main className="prod-main">
  {error && <p role="alert" className="prod-error">{tr(error)} <button onClick={() => void refresh()}>{tr("Reload")}</button></p>}{notice && <p role="status" className="prod-success">{tr(notice)}</p>}
  <div className="prod-heading"><h1>{screen === 'entry' ? tr(actions[kind]?.label||'') : screen === 'company' ? companyData?.name : tr(titles[screen] || 'Stock Management')}</h1><input aria-label={tr("Search companies, artists or stock")} placeholder={tr("Search…")} value={search} onChange={e => setSearch(e.target.value)}/></div>

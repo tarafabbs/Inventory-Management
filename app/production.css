@@ -8,6 +8,14 @@
 @media(max-width:760px){.prod-header .prod-advance{font-size:.72rem;padding:5px 7px;min-height:39px}.prod-header .prod-alert{margin-left:auto;min-height:39px}.prod-header{gap:6px}.prod-header .prod-user{display:none}}
 .prod .prod-nav{top:calc(76px + var(--inventory-language-height,52px))}
 @media(max-width:760px){.prod .prod-nav{top:calc(68px + var(--inventory-language-height,52px))}}
+.prod-inventory-switch{height:52px;position:sticky;top:var(--inventory-language-height,52px);z-index:30;display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:4px 24px;background:#fff;border-bottom:1px solid var(--line);font-size:.88rem;font-weight:600}
+.prod-inventory-switch>div{display:flex;gap:4px;padding:3px;border-radius:10px;background:#f1edf8}
+.prod .prod-inventory-switch a{min-height:36px;display:inline-flex;align-items:center;justify-content:center;padding:5px 12px;border:0;border-radius:8px;background:transparent;white-space:nowrap}
+.prod .prod-inventory-switch a[aria-current=page]{background:var(--purple);color:#fff}
+.prod-with-inventory-switch .prod-header{top:calc(var(--inventory-language-height,52px) + 52px)}
+.prod.prod-with-inventory-switch .prod-nav{top:calc(76px + var(--inventory-language-height,52px) + 52px)}
+@media(max-width:760px){.prod-inventory-switch{justify-content:center;gap:8px;padding:4px 8px;font-size:.78rem}.prod-inventory-switch>div{flex:1;max-width:360px}.prod .prod-inventory-switch a{flex:1;min-width:0;padding:5px 7px;white-space:normal;text-align:center}.prod.prod-with-inventory-switch .prod-nav{top:calc(68px + var(--inventory-language-height,52px) + 52px)}}
+@media print{.prod-inventory-switch{display:none!important}}
 
 .prod .receipt-totals{grid-template-columns:repeat(2,minmax(0,1fr))}.receipt-totals strong{display:block;font-size:1.3rem}.prod .receipt-company-summary section{padding:12px;margin:10px 0}.prod .receipt-stock-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(210px,1fr);gap:18px;align-items:center}.receipt-stock-row h3,.receipt-stock-row p{margin:4px 0}.prod .receipt-dispute{background:#fff4ee;border-color:#e9b49b}.receipt-details:disabled{opacity:.5}.prod .receipt-details:disabled input,.prod .receipt-details:disabled select{cursor:not-allowed}.receipt-stock-row small{overflow-wrap:anywhere}@media(max-width:600px){.prod .receipt-stock-row{grid-template-columns:1fr;gap:6px}.receipt-quantity label{margin:6px 0}.prod .receipt-totals{font-size:.8rem}}
 
