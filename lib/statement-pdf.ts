@@ -1,13 +1,14 @@
 import type {StatementDocument} from './statement-document';
 type PdfMake={createPdf:(definition:unknown,layouts?:unknown,fonts?:unknown,vfs?:unknown)=>{getBlob:(callback:(blob:Blob)=>void)=>void}};
-declare global {interface Window {pdfMake?:PdfMake}}
+declare global {interface Window {pdfMake?:PdfMake;createPdf?:PdfMake['createPdf']}}
 let loading:Promise<PdfMake>|undefined;
+function loadedEngine(){return window.pdfMake||(typeof window.createPdf==='function'?window as PdfMake:undefined);}
 function pdfEngine(){
- if(window.pdfMake)return Promise.resolve(window.pdfMake);
+ const available=loadedEngine();if(available)return Promise.resolve(available);
  if(!loading)loading=new Promise<PdfMake>((resolve,reject)=>{
   const script=document.createElement('script');script.src='/vendor/pdfmake/pdfmake-0.2.20.min.js';script.async=true;
   const timer=setTimeout(()=>{script.remove();loading=undefined;reject(Error('PDF engine took too long to load. Please retry.'));},30000);
-  script.onload=()=>{clearTimeout(timer);if(window.pdfMake)resolve(window.pdfMake);else{loading=undefined;reject(Error('Could not load PDF engine.'));}};
+  script.onload=()=>{clearTimeout(timer);const engine=loadedEngine();if(engine)resolve(engine);else{loading=undefined;reject(Error('Could not load PDF engine.'));}};
   script.onerror=()=>{clearTimeout(timer);script.remove();loading=undefined;reject(Error('Could not load PDF engine.'));};document.head.appendChild(script);
  });return loading;
 }
