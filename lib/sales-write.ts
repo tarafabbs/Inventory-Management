@@ -23,10 +23,18 @@ function value(input: unknown, max: number, label: string, required=false): stri
 
 function layoutValue(data: Fields): SalesLayout {
     const result = {...blankLayout};
-    for (const field of ['seller','address','phone','bank'] as const)
+    for (const field of ['seller','address','phone'] as const)
         result[field]=value(data[field],field==='seller'||field==='phone'?120:1200,field,field==='seller');
     result.gst=gstNumber(value(data.gst,15,'supplier GSTIN'));
-    for (const field of ['logo','signature','qr','bankImage'] as const) {
+    result.bankName=value(data.bankName,120,'bank name');
+    result.accountNumber=value(data.accountNumber,25,'account number');
+    result.ifsc=value(data.ifsc,11,'IFSC').toUpperCase();
+    result.branch=value(data.branch,120,'branch');
+    if ([result.bankName,result.accountNumber,result.ifsc,result.branch].some(Boolean)) {
+        if (!result.bankName || !/^[0-9]{6,25}$/.test(result.accountNumber) || !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(result.ifsc) || !result.branch)
+            throw Error('Enter bank name, 6–25 digit account number, valid IFSC and detected branch.');
+    }
+    for (const field of ['logo','signature','qr'] as const) {
         const image=value(data[field],220_000,field);
         if(image && !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) throw Error('Upload a PNG, JPEG or WebP image.');
         result[field]=image;

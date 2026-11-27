@@ -6,10 +6,11 @@ export type SalesCustomer = { id: string; name: string; address: string; phone: 
 export type SalesProduct = { id: string; name: string; price: number; hsn: string; sku: string; stock_product?: string | null };
 export type SalesLayout = {
     seller: string; address: string; phone: string; gst: string; bank: string;
+    bankName: string; accountNumber: string; ifsc: string; branch: string;
     logo: string; signature: string; qr: string; bankImage: string;
 };
 export const blankLayout: SalesLayout = {
-    seller: 'TaraFabbs', address: '', phone: '', gst: '', bank: '', logo: '', signature: '', qr: '', bankImage: '',
+    seller: 'TaraFabbs', address: '', phone: '', gst: '', bank: '', bankName: '', accountNumber: '', ifsc: '', branch: '', logo: '', signature: '', qr: '', bankImage: '',
 };
 
 export type SaleKind = 'bill' | 'booking' | 'return';

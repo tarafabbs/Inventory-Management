@@ -21,6 +21,21 @@ export async function GET(request:Request) {
         if(!signedIn||!staff||!isManagement(staff.role))return reply({error:'Management access required.'},403);
         const q=new URL(request.url).searchParams;
         switch(q.get('view')) {
+            case 'ifsc': {
+                const ifsc=(q.get('ifsc')||'').trim().toUpperCase();
+                if(!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc))return reply({error:'Enter a valid 11-character IFSC.'},400);
+                let response:Response;
+                try { response=await fetch(`https://ifsc.razorpay.com/${ifsc}`,{cache:'no-store',signal:AbortSignal.timeout(8_000)}); }
+                catch { return reply({error:'Could not check IFSC now. Please retry.'},503); }
+                if(response.status===404)return reply({error:'IFSC not found. Check the code.'},404);
+                if(!response.ok)return reply({error:'Could not check IFSC now. Please retry.'},503);
+                let bank:unknown,branch:unknown,found:unknown;
+                try { const data=await response.json();bank=data.BANK;branch=data.BRANCH;found=data.IFSC; }
+                catch { return reply({error:'Could not read IFSC details. Please retry.'},503); }
+                if(typeof bank!=='string'||!bank.trim()||typeof branch!=='string'||!branch.trim()||found!==ifsc)
+                    return reply({error:'Could not verify IFSC details. Please retry.'},503);
+                return reply({bank:bank.trim().slice(0,120),branch:branch.trim().slice(0,120),ifsc});
+            }
             case 'count': return reply({count:await bookingCount()});
             case 'document': {
                 const document=await salesDocument(q.get('id')||'');

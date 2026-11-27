@@ -21,7 +21,7 @@ export async function salesHub(): Promise<SalesHub> {
                  AND NOT EXISTS (SELECT 1 FROM inventory.sales_documents s WHERE s.booking_id=b.id AND s.voided_at IS NULL)) AS bookings
     `).first<SalesHub>(15_000);
     if (!row) throw Error('Could not load Direct Sell.');
-    return { ...row, layout: row.layout ?? blankLayout };
+    return { ...row, layout: {...blankLayout,...row.layout} };
 }
 
 export async function bookingCount() {
