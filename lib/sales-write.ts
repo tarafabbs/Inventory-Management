@@ -247,7 +247,8 @@ async function saveDocument(tx:Tx,user:InventoryUser,v:Fields,id:string) {
         // Rates and catalogue defaults can evolve. Preserve the printed data of an existing stock line.
         const priorLine=prev?.body.lines.find(l=>l.type===type && (line.source ? l.source && accountKey(l.source)===accountKey(line.source) : l.product===line.product) && l.returnFrom===line.returnFrom);
         if(priorLine && !line.returnFrom)Object.assign(line,{name:priorLine.name,hsn:priorLine.hsn,sku:priorLine.sku});
-        if(gst&&!line.hsn)throw Error('Add the HSN for ' + line.name + ' in Create Product before saving its GST bill.');
+        if(gst && !line.returnFrom && row.hsn!==undefined) line.hsn=value(row.hsn,8,'HSN');
+        if(gst && !/^\d{4,8}$/.test(line.hsn))throw Error('Enter a 4–8 digit HSN for each GST product.');
         lines.push(line);
     }
     const discount=cents(v.discount||0,'Discount'),additional=cents(v.additional||0,'Additional charges');

@@ -19,7 +19,7 @@ export type SaleLine = {
     type: 'sale' | 'return'; product?: string; source?: Account; returnFrom?: string;
 };
 export type SaleInputLine = {
-    quantity: unknown; unit: unknown; type?: unknown; source?: unknown; product?: unknown; returnFrom?: unknown;
+    quantity: unknown; unit: unknown; type?: unknown; source?: unknown; product?: unknown; returnFrom?: unknown; hsn?: unknown;
 };
 export type SaleBody = {
     customer: SalesCustomer; layout: SalesLayout; lines: SaleLine[];
