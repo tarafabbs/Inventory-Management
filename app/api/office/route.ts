@@ -55,23 +55,21 @@ export async function GET(request:Request){try{
   const docs=(await db.prepare("SELECT id,number,date::text,actor_id,body FROM inventory.office_documents WHERE customer=?::uuid AND kind='bill' AND voided_at IS NULL ORDER BY date DESC,created_at DESC").bind(customer).all<{id:string;number:string;date:string;actor_id:string;body:OfficeDocumentBody}>()).results;
   return response(docs.filter(d=>canSee(u,ids,d.actor_id)).map(d=>({id:d.id,number:d.number,date:d.date,lines:d.body.lines.filter(l=>l.dispatched>0)})));
  }
- const [leads,products,documents,layout,rules,money,advances,cycles,moneyRows]=await Promise.all([
-  db.prepare(`SELECT l.*,l.created_on::text,l.follow_up_date::text,
+ const leads=await db.prepare(`SELECT l.*,l.created_on::text,l.follow_up_date::text,
     (SELECT min(d.date)::text FROM inventory.office_documents d WHERE d.customer=l.id AND d.kind='bill' AND d.voided_at IS NULL) AS verified_at,
     (SELECT count(*)::int FROM inventory.office_documents d WHERE d.customer=l.id AND d.kind='bill' AND d.voided_at IS NULL) AS purchases,
     (SELECT coalesce(sum(d.total),0)::float8 FROM inventory.office_documents d WHERE d.customer=l.id AND d.kind='bill' AND d.voided_at IS NULL) AS lifetime_total
-    FROM inventory.office_leads l ORDER BY l.created_at DESC`).all<Lead & {lifetime_total:number}>(),
-  db.prepare('SELECT *,price::float8,approximate_profit::float8,low_incentive::float8 FROM inventory.office_products ORDER BY name').all<Product>(),
-  db.prepare('SELECT id,kind,number,date::text,customer,actor_id,gst,total::float8,paid::float8,revision,status,original_bill,return_reason,voided_at,body FROM inventory.office_documents ORDER BY date DESC,created_at DESC LIMIT 5000').all<OfficeDocument>(),
-  db.prepare('SELECT body FROM inventory.office_bill_layout WHERE singleton').first<{body:Record<string,string>}>(),
-  db.prepare('SELECT body FROM inventory.office_incentive_rules WHERE singleton').first<{body:Record<string,unknown>}>(),
-  db.prepare(`SELECT customer,sum(amount)::float8 AS due FROM (
+    FROM inventory.office_leads l ORDER BY l.created_at DESC`).all<Lead & {lifetime_total:number}>();
+ const products=await db.prepare('SELECT *,price::float8,approximate_profit::float8,low_incentive::float8 FROM inventory.office_products ORDER BY name').all<Product>();
+ const documents=await db.prepare('SELECT id,kind,number,date::text,customer,actor_id,gst,total::float8,paid::float8,revision,status,original_bill,return_reason,voided_at,body FROM inventory.office_documents ORDER BY date DESC,created_at DESC LIMIT 5000').all<OfficeDocument>();
+ const layout=await db.prepare('SELECT body FROM inventory.office_bill_layout WHERE singleton').first<{body:Record<string,string>}>();
+ const rules=await db.prepare('SELECT body FROM inventory.office_incentive_rules WHERE singleton').first<{body:Record<string,unknown>}>();
+ const money=await db.prepare(`SELECT customer,sum(amount)::float8 AS due FROM (
    SELECT customer,total-paid AS amount FROM inventory.office_documents WHERE voided_at IS NULL
-   UNION ALL SELECT customer,amount FROM inventory.office_customer_money) x GROUP BY customer`).all<{customer:string;due:number}>(),
-  db.prepare('SELECT id,employee,date::text,amount::float8,adjusted::float8,notes FROM inventory.office_advances ORDER BY date DESC').all(),
-  db.prepare('SELECT id,employee,period_start::text,period_end::text,salary::float8,incentive::float8,paid::float8,advance_adjusted::float8 FROM inventory.office_salary_cycles ORDER BY period_end DESC').all(),
-  db.prepare('SELECT id,customer,date::text,amount::float8,kind,method,notes FROM inventory.office_customer_money ORDER BY date,created_at').all<{id:string;customer:string;date:string;amount:number;kind:string;method:string;notes:string}>(),
- ]);
+   UNION ALL SELECT customer,amount FROM inventory.office_customer_money) x GROUP BY customer`).all<{customer:string;due:number}>();
+ const advances=await db.prepare('SELECT id,employee,date::text,amount::float8,adjusted::float8,notes FROM inventory.office_advances ORDER BY date DESC').all();
+ const cycles=await db.prepare('SELECT id,employee,period_start::text,period_end::text,salary::float8,incentive::float8,paid::float8,advance_adjusted::float8 FROM inventory.office_salary_cycles ORDER BY period_end DESC').all();
+ const moneyRows=await db.prepare('SELECT id,customer,date::text,amount::float8,kind,method,notes FROM inventory.office_customer_money ORDER BY date,created_at').all<{id:string;customer:string;date:string;amount:number;kind:string;method:string;notes:string}>();
  const visibleLeads=u.role==='Production Manager'?[]:leads.results.filter(l=>canSee(u,ids,l.created_by));
  const visibleDocs=documents.results.filter(d=>u.role==='Production Manager'?d.kind==='bill'&&d.body.advance:canSee(u,ids,d.actor_id));
  const visibleEmployees=isOwner(u.role)||u.role==='Production Manager'?staff:staff.filter(e=>e.user_id===u.id||e.user_id&&canSee(u,ids,e.user_id));
