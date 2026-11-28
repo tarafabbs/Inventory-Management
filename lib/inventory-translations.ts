@@ -1,5 +1,11 @@
 // Reused terminology only. Rendering uses React; no DOM mutation or external translation service.
 export const legacyBengali:Record<string,string>={
+'Raw / White than at Workshop':'কারখানায় কাঁচা / সাদা থান',
+'Set weekly targets':'সাপ্তাহিক লক্ষ্য নির্ধারণ',
+'Save targets':'লক্ষ্য সেভ করুন',
+'Weekly conversion target':'সাপ্তাহিক নতুন ক্রেতার লক্ষ্য',
+'Weekly retention target':'সাপ্তাহিক পুনরায় ক্রয়ের লক্ষ্য',
+'Reports to':'যাঁর অধীনে কাজ করবে',
 'Performance':'কাজ ও পেমেন্টের গতি',
 'Artist Performance':'কারিগরের কাজের গতি',
 'Raw / White Production Time':'কাঁচা / সাদা মাল কতদিন পড়ে আছে',

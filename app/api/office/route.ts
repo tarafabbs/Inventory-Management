@@ -28,6 +28,12 @@ function visibleUsers(u:InventoryUser,employees:Employee[]){
 }
 async function employees(tx:Tx){return (await tx.prepare('SELECT e.*,u.email,e.dob::text AS dob,e.joining_date::text AS joining_date,e.salary::float8 AS salary FROM inventory.office_employees e LEFT JOIN users u ON u.id=e.user_id ORDER BY e.employee_code').all<Employee>()).results;}
 const canSee=(u:InventoryUser,ids:Set<string>|null,actor:string)=>!ids||ids.has(actor);
+function canManageEmployee(u:InventoryUser,actor:Employee|undefined,target:Employee,all:Employee[]){
+ if(isOwner(u.role))return true;
+ if(!actor||target.id===actor.id)return false;
+ if(target.manager_id===actor.id)return true;
+ return u.role==='Office Manager'&&all.some(e=>e.id===target.manager_id&&e.manager_id===actor.id&&e.role==='Assistant Manager');
+}
 async function audit(tx:Tx,u:InventoryUser,action:string,label:string,data:unknown){await tx.prepare('INSERT INTO inventory.change_audit(actor_id,actor,actor_role,action,target_label,after_data) VALUES(?,?,?,?,?,?::text::jsonb)').bind(u.id,u.name,roleLabel(u.role),action,label,JSON.stringify(data)).run();}
 function failure(error:unknown){const dbError='code' in Object(error);if(dbError)console.error('Office outlet database:',(error as {code?:string}).code);return response({error:error instanceof Error&&!dbError?error.message:'Office data could not be saved. Retry using the same form.'},(error as {status?:number})?.status||(dbError?503:400));}
 
@@ -159,13 +165,15 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
    const dob=v.dob?validOfficeDate(v.dob):null,joining=validOfficeDate(v.joiningDate||officeDay());
    const photo=trimOffice(v.photo,220000,'profile photo');if(photo&&!/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(photo))throw Error('Upload a PNG, JPEG or WebP photo.');
    const old=v.id?all.find(e=>e.id===v.id):undefined;
-   if(old&&!isOwner(u.role)&&old.manager_id!==actor?.id)throw reject('Only the direct manager may edit this profile.',403);
+   if(old&&!canManageEmployee(u,actor,old,all))throw reject('Only a higher authority in this team may edit this profile.',403);
    if(old&&old.role!==role)throw Error('Employee role cannot change in this profile. Use Staff Access.');
-   const boss=isOwner(u.role)?String(v.managerId||''):(actor?.id||'');
+   const boss=['Office Manager','Production Manager'].includes(role)?'':isOwner(u.role)?String(v.managerId||''):u.role==='Office Manager'&&role==='Office Staff'?String(v.managerId||actor?.id||''):(actor?.id||'');
    if(!isOwner(u.role)&&!boss)throw Error('Create your own manager profile first.');
-   if(boss&&!all.some(e=>e.id===boss&&e.active))throw Error('Choose an active manager.');
+   const manager=all.find(e=>e.id===boss&&e.active);
+   if(boss&&!manager)throw Error('Choose an active manager.');
    if(role==='Office Staff'&&boss&&!['Assistant Manager','Office Manager'].includes(all.find(e=>e.id===boss)?.role||''))throw Error('Creative Team Member needs a Manager or Assistant Manager.');
    if(role==='Assistant Manager'&&boss&&all.find(e=>e.id===boss)?.role!=='Office Manager')throw Error('Assistant Manager must report to a Manager.');
+   if(u.role==='Office Manager'&&boss!==actor?.id&&!(role==='Office Staff'&&manager?.role==='Assistant Manager'&&manager.manager_id===actor?.id))throw reject('Choose yourself or an Assistant Manager in your team.',403);
    const existingUser=await tx.prepare('SELECT id,role FROM users WHERE lower(email)=?').bind(email).first<{id:string;role:string}>();
    if(existingUser&&existingUser.role!==role)throw Error('This Google email already has another role in Staff Access.');
    if(old&&existingUser&&existingUser.id!==old.user_id)throw Error('This email belongs to a different employee profile.');
@@ -174,15 +182,21 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
    const userId=existingUser?.id||randomUUID();
    if(!existingUser)await tx.prepare('INSERT INTO users(id,email,name,role,active,created_at) VALUES(?,?,?,?,1,?)').bind(userId,email,name,role,new Date().toISOString()).run();
    const salary=officePaise(v.salary||0,'salary');
-   const conversionTarget=Number(v.conversionTarget||0),retentionTarget=Number(v.retentionTarget||0);
-   if(!Number.isSafeInteger(conversionTarget)||conversionTarget<0||conversionTarget>100||!Number.isSafeInteger(retentionTarget)||retentionTarget<0||retentionTarget>100)throw Error('Set weekly targets as percentages from 0 to 100.');
    const target=old?.id||id;
    await tx.prepare(`INSERT INTO inventory.office_employees(id,user_id,role,manager_id,name,dob,phone,joining_date,photo,salary,half_month,conversion_target,retention_target)
     VALUES(?::uuid,?,?,?::uuid,?,?::date,?,?::date,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET manager_id=excluded.manager_id,
     name=excluded.name,dob=excluded.dob,phone=excluded.phone,joining_date=excluded.joining_date,photo=excluded.photo,
-    salary=excluded.salary,half_month=excluded.half_month,conversion_target=excluded.conversion_target,retention_target=excluded.retention_target`)
-    .bind(target,userId,role,boss||null,name,dob,phone,joining,photo,salary,v.halfMonth===true,conversionTarget,retentionTarget).run();
+    salary=excluded.salary,half_month=excluded.half_month`)
+    .bind(target,userId,role,boss||null,name,dob,phone,joining,photo,salary,v.halfMonth===true,0,0).run();
    await audit(tx,u,'office_employee',name,{id:target,role,boss});return {id:target};
+  }
+  case 'employee_target':{
+   const target=all.find(e=>e.id===v.id);
+   if(!target||!canManageEmployee(u,actor,target,all))throw reject('Only a higher authority in this team may set targets.',403);
+   const conversion=Number(v.conversionTarget),retention=Number(v.retentionTarget);
+   if(!Number.isSafeInteger(conversion)||conversion<0||conversion>100||!Number.isSafeInteger(retention)||retention<0||retention>100)throw Error('Set weekly targets as percentages from 0 to 100.');
+   await tx.prepare('UPDATE inventory.office_employees SET conversion_target=?,retention_target=? WHERE id=?::uuid').bind(conversion,retention,target.id).run();
+   await audit(tx,u,'office_employee_target',target.name,{id:target.id,conversion,retention});return {id:target.id};
   }
   case 'rules':{
    if(!isOwner(u.role))throw reject('Only Owner sets incentives.',403);
