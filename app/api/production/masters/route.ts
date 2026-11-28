@@ -3,6 +3,7 @@ import { db } from '@/lib/database';
 import { inventorySession } from '@/lib/inventory-identity';
 import { artisanWorkTypes, isManagement, isOfficeRole, permitted, roleLabel } from '@/lib/rules';
 import { artisanIdentity } from '@/lib/artisan-identity';
+import {normalizeContactNumber} from '@/lib/phone';
 export async function POST(request: Request) {
     try {
         if (request.headers.get('origin') && request.headers.get('origin') !== new URL(request.url).origin)
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
             return Response.json({ error: 'Access denied.' }, { status: 403 });
         if(v.view==='office'&&!isManagement(u.role)&&!isOfficeRole(u.role))return Response.json({error:'Office profile access required.'},{status:403});
         const officeCreation=isOfficeRole(u.role)||v.view==='office';
-        const name = String(v.name || '').trim(), contact = String(v.contact || '').trim(), address = String(v.address || '').trim(), notes = String(v.notes || '').trim();
+        const name = String(v.name || '').trim(), contact = entity==='products'||entity==='inventory.art_styles'?'':normalizeContactNumber(v.contact,v.contactCountry,false,'Contact number'), address = String(v.address || '').trim(), notes = String(v.notes || '').trim();
         if (!name || name.length > 120 || contact.length > 200 || address.length > 1000 || notes.length > 2000)
             throw Error('Check the profile details and field lengths.');
         if (!/^[a-f\d-]{36}$/i.test(v.key || ''))

@@ -10,10 +10,14 @@ const sql=postgres(process.env.SUPABASE_DATABASE_URL,{max:1,prepare:false,ssl:'r
 try{await sql.begin(async tx=>{
  const [migration]=await tx`select to_regclass('inventory.office_employee_codes') is not null as applied`;
  if(!migration.applied)await tx.unsafe(await source('../supabase/migrations/20261128011000_office_outlet.sql'));
+ const [authorization]=await tx`select to_regclass('inventory.office_bill_access_requests') is not null as applied`;
+ if(!authorization.applied)await tx.unsafe(await source('../supabase/migrations/20261128072252_office_bill_authorizations.sql'));
  const prod=await load(await source('../lib/production.ts')),rules=await load(await source('../lib/rules.ts'));
  globalThis.__prod=prod;globalThis.__rules=rules;
  globalThis.__core=await load((await source('../lib/office-core.ts')).replace("import { accountKey, type Account, type Delta } from './production';",'const {accountKey}=globalThis.__prod;'));
- globalThis.__incentives=await load((await source('../lib/office-incentives.ts')).replace("import {defaultIncentiveRule,type IncentiveRule,type OfficeDocument} from './office-core';",'const {defaultIncentiveRule}=globalThis.__core;'));
+ globalThis.__performance=await load(await source('../lib/office-performance.ts'));
+ globalThis.__libphone=await import('libphonenumber-js/max');
+ globalThis.__phone=await load((await source('../lib/phone.ts')).replace("import {getCountries, getCountryCallingCode, parsePhoneNumberFromString, type CountryCode} from 'libphonenumber-js/max';",'const {getCountries,getCountryCallingCode,parsePhoneNumberFromString}=globalThis.__libphone;'));
  const wrapper=client=>({prepare(query){let n=0;query=query.replace(/\b(FROM|JOIN|INTO|UPDATE|DELETE\s+FROM)\s+(companies|products|artisans|settings|users)\b/gi,'$1 inventory.$2').replace(/\?/g,()=>'$'+(++n));const stmt=args=>({bind:(...args)=>stmt(args),first:async()=>((await client.unsafe(query,args))[0]||null),all:async()=>({results:await client.unsafe(query,args)}),run:async()=>client.unsafe(query,args)});return stmt([]);},transaction:fn=>client.savepoint(inner=>fn(wrapper(inner)))});
  globalThis.__db=wrapper(tx);
  let route=await source('../app/api/office/route.ts');
@@ -21,8 +25,9 @@ try{await sql.begin(async tx=>{
   .replace("import {inventorySession,officeUser,type InventoryUser} from '@/lib/inventory-identity';",'const inventorySession=async()=>globalThis.__identity;const officeUser=async staff=>{if(["Admin","Management"].includes(staff.role))return staff;const profile=await globalThis.__db.prepare("SELECT role FROM inventory.office_employees WHERE user_id=? AND active=true").bind(staff.id).first();return profile?{...staff,role:profile.role}:staff;};')
   .replace("import {accountKey,type Account,type Delta} from '@/lib/production';",'const {accountKey}=globalThis.__prod;')
   .replace("import {isOwner,roleLabel} from '@/lib/rules';",'const {isOwner,roleLabel}=globalThis.__rules;')
-  .replace(/import \{defaultIncentiveRule,[^;]+\} from '@\/lib\/office-core';/,'const {defaultIncentiveRule,netOfficeDeltas,officeDay,officeFYear,officeNumber,officePaise,officeQuantity,officeReturnLoss,officeRoles,officeTax,returnReasons,sellingRoles,trimOffice,validOfficeDate}=globalThis.__core;')
-  .replace("import {officeRewards} from '@/lib/office-incentives';",'const {officeRewards}=globalThis.__incentives;');
+  .replace(/import \{netOfficeDeltas,[^;]+\} from '@\/lib\/office-core';/,'const {netOfficeDeltas,officeDay,officeFYear,officeNumber,officePaise,officeQuantity,officeReturnLoss,officeRoles,officeTax,returnReasons,sellingRoles,trimOffice,validOfficeDate}=globalThis.__core;')
+  .replace("import {officePerformance} from '@/lib/office-performance';",'const {officePerformance}=globalThis.__performance;');
+ route=route.replace("import {normalizeContactNumber} from '@/lib/phone';",'const {normalizeContactNumber}=globalThis.__phone;');
  const {GET,POST}=await load(route);
  const [owner]=await tx`select id,name,role from inventory.users where role='Admin' and active=1 limit 1`;assert.ok(owner);
  globalThis.__identity={signedIn:true,staff:owner};
@@ -31,10 +36,16 @@ try{await sql.begin(async tx=>{
  await tx`insert into inventory.products(id,name) values(${category},'Office test silk')`;
  const account={company,product:category,pool:'normal',stage:'office_stock',artisan:'',arts:'',work:''};
  await tx`insert into inventory.production_balances(key,company,product,pool,stage,artisan,arts,work,quantity) values(${prod.accountKey(account)},${company},${category},'normal','office_stock','','','',10)`;
- const send=async(payload,status=200,key=randomUUID())=>{const r=await POST(new Request('https://im.tarafabbs.com/api/office',{method:'POST',headers:{origin:'https://im.tarafabbs.com'},body:JSON.stringify({key,...payload})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
+ const signature='data:image/png;base64,iVBORw0KGgo=';
+ const send=async(payload,status=200,key=randomUUID())=>{if(payload.op==='employee'&&!payload.id&&!Object.hasOwn(payload,'signature'))payload={...payload,signature};const r=await POST(new Request('https://im.tarafabbs.com/api/office',{method:'POST',headers:{origin:'https://im.tarafabbs.com'},body:JSON.stringify({key,...payload})}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));checks++;return body;};
  const get=async(query='')=>{const r=await GET(new Request('https://im.tarafabbs.com/api/office'+query));const body=await r.json();assert.equal(r.status,200,JSON.stringify(body));checks++;return body;};
  const count=async()=>Number((await tx`select quantity from inventory.production_balances where key=${prod.accountKey(account)}`)[0].quantity);
  const lead=(await send({op:'lead',name:'Customer A',phone:'9876543210',sameWhatsapp:true,address:'Kolkata',gst:'19AAAAA0000A1Z5'})).id;
+ assert.equal((await tx`select phone from inventory.office_leads where id=${lead}`)[0].phone,'+919876543210');
+ await send({op:'lead',name:'Invalid India number',phone:'987654321',phoneCountry:'IN',sameWhatsapp:true},400);
+ const overseas=(await send({op:'lead',name:'US lead',phone:'2025550123',phoneCountry:'US',sameWhatsapp:true})).id;
+ assert.equal((await tx`select phone from inventory.office_leads where id=${overseas}`)[0].phone,'+12025550123');
+ await send({op:'lead',name:'Wrong country',phone:'+12025550123',phoneCountry:'IN',sameWhatsapp:true},400);
  const product=(await send({op:'product',name:'Office Silk',stockProduct:category,price:100,hsn:'5007',sku:'S1',profit:5})).id;
  await send({op:'layout',seller:'TaraFabbs',address:'Kolkata',gst:'19AAAAA0000A1Z5',bankName:'Indian Bank',accountNumber:'1234567890',ifsc:'IDIB000A001',branch:'TEST'});
  const normal=await send({op:'bill',customer:lead,date,lines:[{product,source:prod.accountKey(account),quantity:2,unit:100}],paid:100,method:'Cash'});
@@ -54,7 +65,9 @@ try{await sql.begin(async tx=>{
  const roleUser={id:randomUUID(),name:'Creative tester',role:'Office Staff',email:'creative-'+randomUUID()+'@example.test'};
  await tx`insert into inventory.users(id,name,email,role,active,created_at) values(${roleUser.id},${roleUser.name},${roleUser.email},${roleUser.role},1,${new Date().toISOString()})`;
  const manager=(await send({op:'employee',role:'Office Manager',name:'Office test manager',email:'manager-'+randomUUID()+'@example.test',joiningDate:date,salary:2000})).id;
- const staff=(await send({op:'employee',role:'Office Staff',name:roleUser.name,email:roleUser.email,joiningDate:date,salary:1000,managerId:manager,conversionTarget:20,retentionTarget:20})).id;
+ const firstSalaryDate=new Date(Date.parse(date+'T00:00:00Z')+5*864e5).toISOString().slice(0,10);
+ const staff=(await send({op:'employee',role:'Office Staff',name:roleUser.name,email:roleUser.email,joiningDate:date,nextSalaryDate:firstSalaryDate,salary:1000,managerId:manager,conversionTarget:20,retentionTarget:20})).id;
+ assert.equal((await tx`select next_salary_date::text from inventory.office_employees where id=${staff}`)[0].next_salary_date,firstSalaryDate);
  const workshopUser={id:randomUUID(),name:'Workshop and Office tester',role:'Supervisor',email:'both-'+randomUUID()+'@example.test'};
  await tx`insert into inventory.users(id,name,email,role,active,created_at) values(${workshopUser.id},${workshopUser.name},${workshopUser.email},${workshopUser.role},1,${new Date().toISOString()})`;
  const dualProfile=(await send({op:'employee',role:'Office Staff',name:workshopUser.name,email:workshopUser.email,joiningDate:date,managerId:manager})).id;
@@ -82,7 +95,46 @@ try{await sql.begin(async tx=>{
  const salary=(await tx`select salary,paid,advance_adjusted from inventory.office_salary_cycles where employee=${staff}`)[0];assert.deepEqual([Number(salary.salary),Number(salary.paid),Number(salary.advance_adjusted)],[100000,40000,10000]);
  await send({op:'openingDue',customer:lead,date,amount:20,notes:'Prior balance'});
  const openingHub=await get();assert.equal(openingHub.moneyRows.find(r=>r.customer===lead&&r.kind==='opening').amount,2000);
- globalThis.__identity={signedIn:true,staff:roleUser};await send({op:'product',name:'Not allowed',price:1},403);await send({op:'lead',name:'Creative lead',phone:'1111111111'});
+ globalThis.__identity={signedIn:true,staff:roleUser};await send({op:'product',name:'Not allowed',price:1},403);
+ const creativeLead=(await send({op:'lead',name:'Creative lead',phone:'9123456789'})).id;
+ const personal=await get();assert.ok(personal.cycles.some(c=>c.employee===staff));assert.ok(personal.advances.some(a=>a.employee===staff));
+ assert.ok(personal.performance.some(row=>row.employee===staff&&row.leadsDay===1&&row.leadsWeek>=1));
+ assert.equal(Object.hasOwn(personal,'incentives'),false);assert.equal(Object.hasOwn(personal,'rules'),false);
+ const creativeBill=(await send({op:'bill',customer:creativeLead,date,lines:[{product,source:prod.accountKey(account),quantity:1,unit:100}],paid:0})).id;
+ let creativeDoc=(await get()).documents.find(d=>d.id===creativeBill);
+ assert.equal(creativeDoc.body.signatures.creatorName,roleUser.name);
+ assert.equal(creativeDoc.body.signatures.creatorImage,signature);
+ assert.equal((await get()).performance.find(row=>row.employee===staff).totalSales,10000);
+ await send({op:'bill',id:creativeBill,revision:creativeDoc.revision,customer:creativeLead,date,lines:[{product,source:prod.accountKey(account),quantity:1,unit:90}],paid:0});
+ globalThis.__identity={signedIn:true,staff:{id:managerUser,name:'Office test manager',role:'Office Manager'}};
+ creativeDoc=(await get()).documents.find(d=>d.id===creativeBill);
+ const change={op:'bill',id:creativeBill,revision:creativeDoc.revision,customer:creativeLead,date,lines:[{product,source:prod.accountKey(account),quantity:1,unit:80}],paid:0};
+ await send(change,403);
+ const requested=(await send({op:'bill_access_request',document:creativeBill,action:'edit'})).id;
+ globalThis.__identity={signedIn:true,staff:owner};
+ assert.ok((await get()).approvalRequests.some(r=>r.id===requested&&r.status==='pending'));
+ await send({op:'bill_access_decision',id:requested,approve:true});
+ globalThis.__identity={signedIn:true,staff:{id:managerUser,name:'Office test manager',role:'Office Manager'}};
+ await send(change);
+ creativeDoc=(await get()).documents.find(d=>d.id===creativeBill);
+ await send({...change,revision:creativeDoc.revision},403);
+ const deleteRequest=(await send({op:'bill_access_request',document:creativeBill,action:'delete'})).id;
+ globalThis.__identity={signedIn:true,staff:owner};
+ await send({op:'bill_access_decision',id:deleteRequest,approve:false});
+ globalThis.__identity={signedIn:true,staff:{id:managerUser,name:'Office test manager',role:'Office Manager'}};
+ await send({op:'void',id:creativeBill,revision:creativeDoc.revision,confirm:true},403);
+ const approvedDelete=(await send({op:'bill_access_request',document:creativeBill,action:'delete'})).id;
+ globalThis.__identity={signedIn:true,staff:owner};
+ await send({op:'bill_access_decision',id:approvedDelete,approve:true});
+ globalThis.__identity={signedIn:true,staff:{id:managerUser,name:'Office test manager',role:'Office Manager'}};
+ await send({op:'void',id:creativeBill,revision:creativeDoc.revision,confirm:true});
+ const managerLead=(await send({op:'lead',name:'Manager lead',phone:'9876543210'})).id;
+ const managerBill=(await send({op:'bill',customer:managerLead,date,lines:[{product,source:prod.accountKey(account),quantity:1,unit:100}],paid:0})).id;
+ let managerDoc=(await get()).documents.find(d=>d.id===managerBill);
+ await send({op:'bill_access_request',document:managerBill,action:'edit'},403);
+ await send({op:'bill',id:managerBill,revision:managerDoc.revision,customer:managerLead,date,lines:[{product,source:prod.accountKey(account),quantity:1,unit:95}],paid:0});
+ managerDoc=(await get()).documents.find(d=>d.id===managerBill);
+ await send({op:'void',id:managerBill,revision:managerDoc.revision,confirm:true});
  console.log('PASS: Office API migration, lead, catalogue, layout, normal/GST serials, due, payment, return loss and stock, advance fulfilment, void, access; checks:',checks);
  throw Error('ROLLBACK_TEST');
 });}catch(e){if(e.message!=='ROLLBACK_TEST')throw e;}finally{await sql.end();}

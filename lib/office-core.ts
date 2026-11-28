@@ -5,8 +5,8 @@ export const officeRoles=['Admin','Management','Office Manager','Assistant Manag
 export const sellingRoles=['Admin','Management','Office Manager','Assistant Manager','Office Staff'];
 export const returnReasons=['Colour mismatch','Quality issue','Not satisfied','FULL DISPUTE','PARTIALLY DISPUTE','CASH RETURN'] as const;
 export type ReturnReason=typeof returnReasons[number];
-export type OfficeLine={id:string;product:string;name:string;quantity:number;unit:number;hsn:string;sku:string;source?:Account;dispatched:number;paymentReceived:boolean;profit:number;incentiveClass:'normal'|'low'|'excluded';lowIncentive:number};
-export type OfficeDocumentBody={customer:{id:string;name:string;business_name:string;phone:string;address:string;gst:string};lines:OfficeLine[];layout:Record<string,string>;gst:boolean;cgstRate:number;sgstRate:number;igstRate:number;discount:number;additional:number;notes:string;advance:boolean;deadline:string;paymentMethod:string;replacement?:{product:string;name:string;quantity:number;unit:number;source?:Account};loss:number};
+export type OfficeLine={id:string;product:string;name:string;quantity:number;unit:number;hsn:string;sku:string;source?:Account;dispatched:number;paymentReceived:boolean;profit:number};
+export type OfficeDocumentBody={customer:{id:string;name:string;business_name:string;phone:string;address:string;gst:string};lines:OfficeLine[];layout:Record<string,string>;gst:boolean;cgstRate:number;sgstRate:number;igstRate:number;discount:number;additional:number;notes:string;advance:boolean;deadline:string;paymentMethod:string;replacement?:{product:string;name:string;quantity:number;unit:number;source?:Account};loss:number;signatures?:{creatorName:string;creatorRole:string;creatorImage:string;managerName:string;managerImage:string}};
 export type OfficeDocument={id:string;kind:'bill'|'return';number:string;date:string;customer:string;actor_id:string;gst:boolean;body:OfficeDocumentBody;stock_delta:Delta[];total:number;paid:number;revision:number;status:'open'|'settled';original_bill:string|null;return_reason:string;voided_at:string|null};
 export const validOfficeDate=(input:unknown,future=false)=>{const date=String(input||'');if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date||(!future&&date>officeDay()))throw Error('Choose a valid date.');return date;};
 export const officePaise=(input:unknown,label='Amount')=>{const value=typeof input==='string'&&input.trim()?Number(input):input;if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>1e9||Math.abs(value*100-Math.round(value*100))>0.0001)throw Error('Check '+label+'.');return Math.round(value*100);};
@@ -17,21 +17,3 @@ export const officeNumber=(series:string,year:number,n:number)=>series+'-'+Strin
 export const officeTax=(subtotal:number,discount:number,additional:number,cgstRate:number,sgstRate:number,igstRate:number)=>{const taxable=subtotal-discount+additional;if(taxable<0)throw Error('Discount exceeds bill amount.');const tax=(rate:number)=>Math.round(taxable*rate/10000);return {subtotal,taxable,cgst:tax(cgstRate),sgst:tax(sgstRate),igst:tax(igstRate),total:taxable+tax(cgstRate)+tax(sgstRate)+tax(igstRate)};};
 export const officeReturnLoss=(reason:ReturnReason,saleValue:number)=>Math.round(saleValue*({'FULL DISPUTE':90,'PARTIALLY DISPUTE':50,'CASH RETURN':20} as Record<string,number>)[reason]/100)||0;
 export const netOfficeDeltas=(deltas:Delta[])=>{const rows=new Map<string,Delta>();for(const delta of deltas){const key=accountKey(delta);rows.set(key,{...delta,quantity:(rows.get(key)?.quantity||0)+delta.quantity});}return [...rows.values()].filter(row=>row.quantity);};
-export type IncentiveRule={firstConversions:number;newCustomer:number;newMinimumPieces:number;newExtraPerFive:number;repeatPerFive:number;tenPieceBonus:number;nextTenBonus:number;weeklyPenaltyPercent:number};
-export const defaultIncentiveRule:IncentiveRule={firstConversions:10,newCustomer:10000,newMinimumPieces:5,newExtraPerFive:5000,repeatPerFive:5000,tenPieceBonus:10000,nextTenBonus:20000,weeklyPenaltyPercent:25};
-export function incentiveForBill(input:{isFirst:boolean;priorConversions:number;normalPieces:number;lowPieces:number;lowAmount:number;role:string},rule=defaultIncentiveRule){
- const eligible=input.normalPieces+input.lowPieces;
- if(input.isFirst){
-  if(input.priorConversions<rule.firstConversions||eligible<rule.newMinimumPieces||input.normalPieces<1)return 0;
-  return rule.newCustomer+Math.floor(Math.max(0,eligible-rule.newMinimumPieces)/5)*rule.newExtraPerFive+input.lowAmount;
- }
- if(eligible<1)return 0;
- const repeat=Math.ceil(eligible/5)*rule.repeatPerFive;
- const milestone=eligible>=20?rule.tenPieceBonus+rule.nextTenBonus:eligible>=10?rule.tenPieceBonus:0;
- return repeat+milestone+input.lowAmount;
-}
-export function incentiveSplit(total:number,role:string){
- if(role==='Office Staff'){const manager=total>=5000?1000:0,assistant=total>=5000?1000:0;return {self:total-manager-assistant,assistant,manager};}
- if(role==='Assistant Manager'){const manager=total>=5000?1000:0;return {self:total-manager,assistant:0,manager};}
- return {self:total,assistant:0,manager:0};
-}

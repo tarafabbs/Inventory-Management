@@ -3,6 +3,7 @@ import type { LedgerDatabase } from './database';
 import type { InventoryUser } from './inventory-identity';
 import { accountKey, type Account, type Delta } from './production';
 import { isOwner, roleLabel } from './rules';
+import {normalizeContactNumber} from './phone';
 import {
     blankLayout, calculateSale, cents, dateValue, documentNumber, fiscalYear, gstNumber, netStock, rate, saleStages,
     seriesFor, units, type SalesCustomer, type SalesLayout, type SalesProduct, type SaleBody, type SaleKind,
@@ -66,7 +67,7 @@ export async function salesMutation(tx:Tx,user:InventoryUser,v:Fields) {
     switch(v.op) {
         case 'customer': {
             const name=value(v.name,120,'customer name',true);
-            const address=value(v.address,800,'customer address'),phone=value(v.phone,50,'phone');
+            const address=value(v.address,800,'customer address'),phone=normalizeContactNumber(v.phone,v.phoneCountry,false,'Customer phone');
             const gst=gstNumber(value(v.gst,15,'customer GSTIN'));
             const target=typeof v.id==='string' && v.id ? (await customerById(tx,v.id)).id : id;
             await tx.prepare(`INSERT INTO inventory.sales_customers(id,name,address,phone,gst) VALUES(?,?,?,?,?)

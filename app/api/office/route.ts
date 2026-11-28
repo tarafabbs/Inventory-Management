@@ -3,16 +3,17 @@ import {db} from '@/lib/database';
 import {inventorySession,officeUser,type InventoryUser} from '@/lib/inventory-identity';
 import {accountKey,type Account,type Delta} from '@/lib/production';
 import {isOwner,roleLabel} from '@/lib/rules';
-import {defaultIncentiveRule,netOfficeDeltas,officeDay,officeFYear,officeNumber,officePaise,officeQuantity,officeReturnLoss,officeRoles,officeTax,returnReasons,sellingRoles,trimOffice,validOfficeDate,type OfficeDocument,type OfficeDocumentBody,type OfficeLine,type ReturnReason} from '@/lib/office-core';
-import {officeRewards} from '@/lib/office-incentives';
+import {netOfficeDeltas,officeDay,officeFYear,officeNumber,officePaise,officeQuantity,officeReturnLoss,officeRoles,officeTax,returnReasons,sellingRoles,trimOffice,validOfficeDate,type OfficeDocument,type OfficeDocumentBody,type OfficeLine,type ReturnReason} from '@/lib/office-core';
+import {officePerformance} from '@/lib/office-performance';
+import {normalizeContactNumber} from '@/lib/phone';
 
 export const dynamic='force-dynamic';
 const response=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const reject=(message:string,status=400)=>Object.assign(Error(message),{status});
 type Tx=Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Fields=Record<string,unknown>;
-type Employee={id:string;user_id:string|null;email:string;employee_code:string;role:string;manager_id:string|null;name:string;dob:string|null;phone:string;joining_date:string;photo:string;salary:number;half_month:boolean;conversion_target:number;retention_target:number;active:boolean};
-type Product={id:string;name:string;stock_product:string|null;price:number;hsn:string;sku:string;approximate_profit:number;incentive_class:'normal'|'low'|'excluded';low_incentive:number;active:boolean};
+type Employee={id:string;user_id:string|null;email:string;employee_code:string;role:string;manager_id:string|null;name:string;dob:string|null;phone:string;joining_date:string;next_salary_date:string|null;photo:string;signature:string;salary:number;half_month:boolean;conversion_target:number;retention_target:number;active:boolean};
+type Product={id:string;name:string;stock_product:string|null;price:number;hsn:string;sku:string;approximate_profit:number;active:boolean};
 type Lead={id:string;name:string;business_name:string;phone:string;whatsapp:string;address:string;gst:string;created_by:string;created_on:string;follow_up_date:string|null;notes:string;verified_at:string|null;purchases:number;average_monthly:number};
 
 async function user(){const s=await inventorySession();if(!s.signedIn||!s.staff)throw reject('Office access required.',403);const u=await officeUser(s.staff);if(!officeRoles.includes(u.role))throw reject('Office access required.',403);return u;}
@@ -20,14 +21,34 @@ const management=(u:InventoryUser)=>['Admin','Management','Office Manager'].incl
 const seller=(u:InventoryUser)=>sellingRoles.includes(u.role);
 const profile=(u:InventoryUser,employees:Employee[])=>employees.find(e=>e.user_id===u.id);
 function visibleUsers(u:InventoryUser,employees:Employee[]){
- if(management(u))return null;
+ if(isOwner(u.role))return null;
  const self=profile(u,employees);if(!self)return new Set([u.id]);
  const ids=new Set([u.id]);let pending=[self.id];
  while(pending.length){const next=employees.filter(e=>e.manager_id&&pending.includes(e.manager_id));pending=next.map(e=>e.id);for(const e of next)if(e.user_id)ids.add(e.user_id);}
  return ids;
 }
-async function employees(tx:Tx){return (await tx.prepare('SELECT e.*,u.email,e.dob::text AS dob,e.joining_date::text AS joining_date,e.salary::float8 AS salary FROM inventory.office_employees e LEFT JOIN users u ON u.id=e.user_id ORDER BY e.employee_code').all<Employee>()).results;}
+async function employees(tx:Tx){return (await tx.prepare('SELECT e.*,u.email,e.dob::text AS dob,e.joining_date::text AS joining_date,e.next_salary_date::text AS next_salary_date,e.salary::float8 AS salary FROM inventory.office_employees e LEFT JOIN users u ON u.id=e.user_id ORDER BY e.employee_code').all<Employee>()).results;}
 const canSee=(u:InventoryUser,ids:Set<string>|null,actor:string)=>!ids||ids.has(actor);
+async function billChangeApproval(tx:Tx,u:InventoryUser,doc:OfficeDocument,action:'edit'|'delete',scope:Set<string>|null){
+ if(!canSee(u,scope,doc.actor_id))throw reject('This bill belongs to another team.',403);
+ if(isOwner(u.role))return null;
+ if(doc.actor_id===u.id)return null;
+ if(u.role==='Office Staff'){
+  throw reject('Only the bill creator can change this bill.',403);
+ }
+ if(!['Office Manager','Assistant Manager'].includes(u.role))throw reject('Only your team member’s bill can be submitted for Owner approval.',403);
+ const granted=await tx.prepare("SELECT id FROM inventory.office_bill_access_requests WHERE document=?::uuid AND requester_id=? AND action=? AND status='approved' ORDER BY decided_at DESC LIMIT 1 FOR UPDATE")
+  .bind(doc.id,u.id,action).first<{id:string}>();
+ if(!granted)throw reject('Request Owner approval before changing this bill.',403);
+ return granted.id;
+}
+async function useBillApproval(tx:Tx,id:string|null){if(id)await tx.prepare("UPDATE inventory.office_bill_access_requests SET status='used',used_at=clock_timestamp() WHERE id=?::uuid AND status='approved'").bind(id).run();}
+async function signerSnapshot(tx:Tx,u:InventoryUser,creatorId=u.id){
+ const all=await employees(tx),creator=all.find(e=>e.user_id===creatorId),direct=all.find(e=>e.id===creator?.manager_id);
+ const legacy=creator?null:await tx.prepare('SELECT name,role FROM users WHERE id=?').bind(creatorId).first<{name:string;role:string}>();
+ const manager=creator?.role==='Office Manager'?creator:direct?.role==='Office Manager'?direct:all.find(e=>e.id===direct?.manager_id&&e.role==='Office Manager');
+ return {creatorName:creator?.name||legacy?.name||u.name,creatorRole:creator?.role||legacy?.role||u.role,creatorImage:creator?.signature||'',managerName:manager?.name||'',managerImage:manager?.signature||''};
+}
 function canManageEmployee(u:InventoryUser,actor:Employee|undefined,target:Employee,all:Employee[]){
  if(isOwner(u.role))return true;
  if(!actor||target.id===actor.id)return false;
@@ -66,30 +87,31 @@ export async function GET(request:Request){try{
     (SELECT count(*)::int FROM inventory.office_documents d WHERE d.customer=l.id AND d.kind='bill' AND d.voided_at IS NULL) AS purchases,
     (SELECT coalesce(sum(d.total),0)::float8 FROM inventory.office_documents d WHERE d.customer=l.id AND d.kind='bill' AND d.voided_at IS NULL) AS lifetime_total
     FROM inventory.office_leads l ORDER BY l.created_at DESC`).all<Lead & {lifetime_total:number}>();
- const products=await db.prepare('SELECT *,price::float8,approximate_profit::float8,low_incentive::float8 FROM inventory.office_products ORDER BY name').all<Product>();
- const documents=await db.prepare('SELECT id,kind,number,date::text,customer,actor_id,gst,total::float8,paid::float8,revision,status,original_bill,return_reason,voided_at,body FROM inventory.office_documents ORDER BY date DESC,created_at DESC LIMIT 5000').all<OfficeDocument>();
+ const products=await db.prepare('SELECT id,name,stock_product,price::float8,hsn,sku,approximate_profit::float8,active FROM inventory.office_products ORDER BY name').all<Product>();
+ const documents=await db.prepare('SELECT id,kind,number,date::text,customer,actor_id,gst,total::float8,paid::float8,revision,status,original_bill,return_reason,voided_at,body FROM inventory.office_documents ORDER BY date DESC,created_at DESC').all<OfficeDocument>();
  const layout=await db.prepare('SELECT body FROM inventory.office_bill_layout WHERE singleton').first<{body:Record<string,string>}>();
- const rules=await db.prepare('SELECT body FROM inventory.office_incentive_rules WHERE singleton').first<{body:Record<string,unknown>}>();
  const money=await db.prepare(`SELECT customer,sum(amount)::float8 AS due FROM (
    SELECT customer,total-paid AS amount FROM inventory.office_documents WHERE voided_at IS NULL
    UNION ALL SELECT customer,amount FROM inventory.office_customer_money) x GROUP BY customer`).all<{customer:string;due:number}>();
  const advances=await db.prepare('SELECT id,employee,date::text,amount::float8,adjusted::float8,notes FROM inventory.office_advances ORDER BY date DESC').all();
- const cycles=await db.prepare('SELECT id,employee,period_start::text,period_end::text,salary::float8,incentive::float8,paid::float8,advance_adjusted::float8 FROM inventory.office_salary_cycles ORDER BY period_end DESC').all();
+ const cycles=await db.prepare('SELECT id,employee,period_start::text,period_end::text,salary::float8,paid::float8,advance_adjusted::float8 FROM inventory.office_salary_cycles ORDER BY period_end DESC').all();
  const moneyRows=await db.prepare('SELECT id,customer,date::text,amount::float8,kind,method,notes FROM inventory.office_customer_money ORDER BY date,created_at').all<{id:string;customer:string;date:string;amount:number;kind:string;method:string;notes:string}>();
  const visibleLeads=u.role==='Production Manager'?[]:leads.results.filter(l=>canSee(u,ids,l.created_by));
  const visibleDocs=documents.results.filter(d=>u.role==='Production Manager'?d.kind==='bill'&&d.body.advance:canSee(u,ids,d.actor_id));
  const visibleEmployees=isOwner(u.role)||u.role==='Production Manager'?staff:staff.filter(e=>e.user_id===u.id||e.user_id&&canSee(u,ids,e.user_id));
  const salaryEmployees=isOwner(u.role)?new Set(staff.map(e=>e.id)):new Set(staff.filter(e=>e.user_id!==u.id&&e.user_id&&canSee(u,ids,e.user_id)).map(e=>e.id));
- const incentive=officeRewards(documents.results,staff,leads.results,rules?.body as unknown as typeof defaultIncentiveRule||defaultIncentiveRule);
+ const privateSalaryIds=new Set([...salaryEmployees,...staff.filter(e=>e.user_id===u.id).map(e=>e.id)]);
+ const performance=officePerformance(documents.results,staff,leads.results,officeDay());
  const visibleEmployeeIds=new Set(visibleEmployees.map(e=>e.id));
+ const approvals=(await db.prepare("SELECT r.id,r.document,r.requester_id,r.action,r.status,r.reason,r.requested_at::text,r.decided_at::text,d.number,u.name AS requester_name FROM inventory.office_bill_access_requests r JOIN inventory.office_documents d ON d.id=r.document JOIN users u ON u.id=r.requester_id WHERE r.status<>'used' AND (?=1 OR r.requester_id=?) ORDER BY r.requested_at DESC LIMIT 200").bind(isOwner(u.role)?1:0,u.id).all()).results;
  return response({user:{id:u.id,name:u.name,role:u.role},employees:visibleEmployees.map(e=>salaryEmployees.has(e.id)||e.user_id===u.id?e:{...e,salary:0,email:''}),
   leads:visibleLeads,products:u.role==='Production Manager'?[]:products.results,
-  documents:visibleDocs,layout:layout?.body||{},rules:isOwner(u.role)?rules?.body||defaultIncentiveRule:undefined,
+  documents:visibleDocs,layout:layout?.body||{},
   balances:money.results.filter(b=>visibleLeads.some(l=>l.id===b.customer)),
   moneyRows:moneyRows.results.filter(b=>visibleLeads.some(l=>l.id===b.customer)),
-  advances:advances.results.filter((a:any)=>salaryEmployees.has(a.employee)),
-  cycles:cycles.results.filter((c:any)=>salaryEmployees.has(c.employee)),
-  incentives:incentive.rewards.filter(r=>visibleEmployeeIds.has(r.employee)),targets:incentive.targets.filter(r=>visibleEmployeeIds.has(r.employee)),
+  advances:advances.results.filter((a:any)=>privateSalaryIds.has(a.employee)),
+  cycles:cycles.results.filter((c:any)=>privateSalaryIds.has(c.employee)),
+  performance:performance.kpis.filter(r=>visibleEmployeeIds.has(r.employee)),targets:performance.targets.filter(r=>visibleEmployeeIds.has(r.employee)),approvalRequests:approvals,
   currentDate:officeDay()});
 }catch(error){return failure(error);}}
 
@@ -116,8 +138,8 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
  switch(v.op){
   case 'lead':{
    if(!seller(u))throw reject('Only the selling team can manage leads.',403);
-   const name=trimOffice(v.name,120,'lead name',true),phone=trimOffice(v.phone,30,'calling number',true),business=trimOffice(v.businessName,120,'business name');
-   const whatsapp=v.sameWhatsapp===true?phone:trimOffice(v.whatsapp,30,'WhatsApp number');
+   const name=trimOffice(v.name,120,'lead name',true),phone=normalizeContactNumber(v.phone,v.phoneCountry,true,'Calling number'),business=trimOffice(v.businessName,120,'business name');
+   const whatsapp=v.sameWhatsapp===true?phone:normalizeContactNumber(v.whatsapp,v.whatsappCountry,false,'WhatsApp number');
    const address=trimOffice(v.address,800,'address'),gst=trimOffice(v.gst,15,'GSTIN').toUpperCase(),notes=trimOffice(v.notes,2000,'follow-up notes');
    const follow=v.followUp?validOfficeDate(v.followUp,true):null;
    if(gst&&!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gst))throw Error('Enter a valid GSTIN.');
@@ -136,14 +158,11 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
    if(hsn&&!/^\d{4,8}$/.test(hsn))throw Error('HSN must have 4–8 digits.');
    const stockProduct=trimOffice(v.stockProduct,120,'stock category');if(stockProduct&&!await tx.prepare("SELECT id FROM products WHERE id=? AND office_only=0").bind(stockProduct).first())throw Error('Choose a factory product category.');
    const old=v.id?await tx.prepare('SELECT * FROM inventory.office_products WHERE id=?::uuid').bind(String(v.id)).first<Product>():null;
-   const incentiveClass=isOwner(u.role)&&['normal','low','excluded'].includes(String(v.incentiveClass))?String(v.incentiveClass):old?.incentive_class||'normal';
-   const lowIncentive=isOwner(u.role)?officePaise(v.lowIncentive||0):Number(old?.low_incentive||0);
    const target=old?.id||id;
-   await tx.prepare(`INSERT INTO inventory.office_products(id,name,stock_product,price,hsn,sku,approximate_profit,incentive_class,low_incentive)
-    VALUES(?::uuid,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,stock_product=excluded.stock_product,
-    price=excluded.price,hsn=excluded.hsn,sku=excluded.sku,approximate_profit=excluded.approximate_profit,
-    incentive_class=excluded.incentive_class,low_incentive=excluded.low_incentive`)
-    .bind(target,name,stockProduct||null,price,hsn,sku,officePaise(v.profit||0,'approximate profit'),incentiveClass,lowIncentive).run();
+   await tx.prepare(`INSERT INTO inventory.office_products(id,name,stock_product,price,hsn,sku,approximate_profit)
+    VALUES(?::uuid,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,stock_product=excluded.stock_product,
+    price=excluded.price,hsn=excluded.hsn,sku=excluded.sku,approximate_profit=excluded.approximate_profit`)
+    .bind(target,name,stockProduct||null,price,hsn,sku,officePaise(v.profit||0,'approximate profit')).run();
    await audit(tx,u,'office_product',name,{id:target});return {id:target};
   }
   case 'layout':{
@@ -160,11 +179,15 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
    const role=String(v.role||'');if(!['Office Manager','Assistant Manager','Office Staff','Production Manager'].includes(role))throw Error('Choose an Office role.');
    if((role==='Office Manager'||role==='Production Manager')&&!isOwner(u.role))throw reject('Only Owner creates Manager or Production Manager.',403);
    if(u.role==='Assistant Manager'&&role!=='Office Staff')throw reject('Assistant Manager can create Creative Team Members only.',403);
-   const name=trimOffice(v.name,120,'employee name',true),phone=trimOffice(v.phone,30,'phone'),email=trimOffice(v.email,200,'Google email',true).toLowerCase();
+   const name=trimOffice(v.name,120,'employee name',true),phone=normalizeContactNumber(v.phone,v.phoneCountry,false,'Contact number'),email=trimOffice(v.email,200,'Google email',true).toLowerCase();
    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))throw Error('Enter the employee Google email.');
    const dob=v.dob?validOfficeDate(v.dob):null,joining=validOfficeDate(v.joiningDate||officeDay());
    const photo=trimOffice(v.photo,220000,'profile photo');if(photo&&!/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(photo))throw Error('Upload a PNG, JPEG or WebP photo.');
+   const signatureInput=trimOffice(v.signature,220000,'employee signature');
+   if(signatureInput&&!/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(signatureInput))throw Error('Upload a PNG, JPEG or WebP signature.');
    const old=v.id?all.find(e=>e.id===v.id):undefined;
+   const signature=signatureInput||old?.signature||'';
+   if(!old&&!signature)throw Error('Upload this employee’s signature before creating the profile.');
    if(old&&!canManageEmployee(u,actor,old,all))throw reject('Only a higher authority in this team may edit this profile.',403);
    if(old&&old.role!==role)throw Error('Employee role cannot change in this profile. Use Staff Access.');
    const boss=['Office Manager','Production Manager'].includes(role)?'':isOwner(u.role)?String(v.managerId||''):u.role==='Office Manager'&&role==='Office Staff'?String(v.managerId||actor?.id||''):(actor?.id||'');
@@ -180,13 +203,14 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
    if(!old&&existingUser&&all.some(e=>e.user_id===existingUser.id))throw Error('This Google email already has an Office profile.');
    const userId=existingUser?.id||randomUUID();
    if(!existingUser)await tx.prepare('INSERT INTO users(id,email,name,role,active,created_at) VALUES(?,?,?,?,1,?)').bind(userId,email,name,role,new Date().toISOString()).run();
-   const salary=officePaise(v.salary||0,'salary');
+   const salary=officePaise(v.salary||0,'salary'),nextSalaryDate=v.nextSalaryDate?validOfficeDate(v.nextSalaryDate,true):old?.next_salary_date||null;
+   if(nextSalaryDate&&nextSalaryDate<joining)throw Error('First salary date must be on or after joining date.');
    const target=old?.id||id;
-   await tx.prepare(`INSERT INTO inventory.office_employees(id,user_id,role,manager_id,name,dob,phone,joining_date,photo,salary,half_month,conversion_target,retention_target)
-    VALUES(?::uuid,?,?,?::uuid,?,?::date,?,?::date,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET manager_id=excluded.manager_id,
-    name=excluded.name,dob=excluded.dob,phone=excluded.phone,joining_date=excluded.joining_date,photo=excluded.photo,
+   await tx.prepare(`INSERT INTO inventory.office_employees(id,user_id,role,manager_id,name,dob,phone,joining_date,next_salary_date,photo,signature,salary,half_month,conversion_target,retention_target)
+    VALUES(?::uuid,?,?,?::uuid,?,?::date,?,?::date,?::date,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET manager_id=excluded.manager_id,
+    name=excluded.name,dob=excluded.dob,phone=excluded.phone,joining_date=excluded.joining_date,next_salary_date=excluded.next_salary_date,photo=excluded.photo,signature=excluded.signature,
     salary=excluded.salary,half_month=excluded.half_month`)
-    .bind(target,userId,role,boss||null,name,dob,phone,joining,photo,salary,v.halfMonth===true,0,0).run();
+    .bind(target,userId,role,boss||null,name,dob,phone,joining,nextSalaryDate,photo,signature,salary,v.halfMonth===true,0,0).run();
    await audit(tx,u,'office_employee',name,{id:target,role,boss});return {id:target};
   }
   case 'employee_target':{
@@ -197,26 +221,43 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
    await tx.prepare('UPDATE inventory.office_employees SET conversion_target=?,retention_target=? WHERE id=?::uuid').bind(conversion,retention,target.id).run();
    await audit(tx,u,'office_employee_target',target.name,{id:target.id,conversion,retention});return {id:target.id};
   }
-  case 'rules':{
-   if(!isOwner(u.role))throw reject('Only Owner sets incentives.',403);
-   const body={...defaultIncentiveRule,...Object.fromEntries(Object.keys(defaultIncentiveRule).map(k=>[k,Number(v[k]??(defaultIncentiveRule as unknown as Record<string,number>)[k])]))};
-   if(Object.values(body).some(n=>!Number.isSafeInteger(n)||n<0||n>1e7))throw Error('Check incentive rules.');
-   await tx.prepare('INSERT INTO inventory.office_incentive_rules(singleton,body) VALUES(true,?::text::jsonb) ON CONFLICT(singleton) DO UPDATE SET body=excluded.body').bind(JSON.stringify(body)).run();
-   await audit(tx,u,'office_incentive_rules','Office rules',body);return {id:'rules'};
-  }
   case 'bill': return saveBill(tx,u,v,scope);
+  case 'bill_access_request':{
+   if(!['Office Manager','Assistant Manager'].includes(u.role))throw reject('Manager access required.',403);
+   const action=String(v.action||'');if(!['edit','delete'].includes(action))throw Error('Choose edit or delete access.');
+   const doc=await document(tx,String(v.document||''));
+   if(!canSee(u,scope,doc.actor_id)||doc.actor_id===u.id)throw reject('Choose a bill created by a member of your team.',403);
+   const pending=await tx.prepare("SELECT id FROM inventory.office_bill_access_requests WHERE document=?::uuid AND requester_id=? AND action=? AND status='pending'").bind(doc.id,u.id,action).first<{id:string}>();
+   if(pending)return {id:pending.id,status:'pending'};
+   const requestId=randomUUID();
+   await tx.prepare("INSERT INTO inventory.office_bill_access_requests(id,document,requester_id,action,reason) VALUES(?::uuid,?::uuid,?,?,?)")
+    .bind(requestId,doc.id,u.id,action,trimOffice(v.reason,500,'reason')).run();
+   await audit(tx,u,'office_bill_access_requested',doc.number,{id:requestId,action});return {id:requestId,status:'pending'};
+  }
+  case 'bill_access_decision':{
+   if(!isOwner(u.role))throw reject('Only Owner can approve bill access.',403);
+   const request=await tx.prepare("SELECT r.id,r.document,r.action,r.requester_id,r.status,d.number FROM inventory.office_bill_access_requests r JOIN inventory.office_documents d ON d.id=r.document WHERE r.id=?::uuid FOR UPDATE")
+    .bind(String(v.id||'')).first<{id:string;document:string;action:string;requester_id:string;status:string;number:string}>();
+   if(!request||request.status!=='pending')throw reject('This request is no longer pending.',409);
+   const status=v.approve===true?'approved':'denied';
+   await tx.prepare('UPDATE inventory.office_bill_access_requests SET status=?,decided_by=?,decided_at=clock_timestamp() WHERE id=?::uuid')
+    .bind(status,u.id,request.id).run();
+   await audit(tx,u,'office_bill_access_decided',request.number,{id:request.id,status,action:request.action,requester:request.requester_id});
+   return {id:request.id,status};
+  }
   case 'dispatch': return dispatch(tx,u,v,scope);
   case 'payment': return payment(tx,u,v,scope);
   case 'return': return returnBill(tx,u,v,scope);
   case 'void':{
    if(!seller(u))throw reject('Selling team access required.',403);
    const old=await document(tx,String(v.id),v.revision);
-   if(!canSee(u,scope,old.actor_id))throw reject('This bill belongs to another team.',403);
+   const approval=await billChangeApproval(tx,u,old,'delete',scope);
    if(v.confirm!==true)throw Error('Confirm bill deletion.');
    if(await tx.prepare('SELECT id FROM inventory.office_documents WHERE original_bill=?::uuid AND voided_at IS NULL LIMIT 1').bind(old.id).first())throw Error('Reverse linked returns before deleting this bill.');
    await revision(tx,u,old,'deleted');
    await postStock(tx,u,old.id,officeDay(),old.number,old.stock_delta.map(d=>({...d,quantity:-d.quantity})),'office_bill_void');
    await tx.prepare('UPDATE inventory.office_documents SET voided_at=clock_timestamp(),revision=revision+1,updated_at=clock_timestamp() WHERE id=?::uuid').bind(old.id).run();
+   await useBillApproval(tx,approval);
    return {id:old.id};
   }
   case 'advance':{
@@ -242,7 +283,7 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
 async function saveBill(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null){
  if(!seller(u))throw reject('Selling team access required.',403);
  const previous=v.id?await document(tx,String(v.id),v.revision):null;
- if(previous&&!canSee(u,scope,previous.actor_id))throw reject('This bill belongs to another team.',403);
+ const approval=previous?await billChangeApproval(tx,u,previous,'edit',scope):null;
  if(previous&&(previous.kind!=='bill'||previous.body.lines.some(l=>l.dispatched>0&&previous.body.advance)))throw Error('A dispatched advance bill cannot be edited. Use a return or adjustment.');
  if(previous&&await tx.prepare("SELECT id FROM inventory.office_documents WHERE original_bill=?::uuid AND voided_at IS NULL LIMIT 1").bind(previous.id).first())throw Error('This bill has returns. Reverse the return before editing it.');
  const customer=await lead(tx,String(v.customer||''));if(!canSee(u,scope,customer.created_by))throw reject('Choose a lead in your team.',403);
@@ -257,7 +298,7 @@ async function saveBill(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null){
  const input=Array.isArray(v.lines)?v.lines:[];if(!input.length||input.length>100)throw Error('Add 1–100 products.');
  const lines:OfficeLine[]=[];
  for(const value of input){const row=value as Fields,quantity=officeQuantity(row.quantity),unit=officePaise(row.unit,'price');
-  const item=await tx.prepare('SELECT *,price::float8,approximate_profit::float8,low_incentive::float8 FROM inventory.office_products WHERE id=?::uuid AND active').bind(String(row.product||'')).first<Product>();
+  const item=await tx.prepare('SELECT *,price::float8,approximate_profit::float8 FROM inventory.office_products WHERE id=?::uuid AND active').bind(String(row.product||'')).first<Product>();
   if(!item)throw Error('Choose a saved Office product.');
   let source:Account|undefined;
   if(item.stock_product){const found=await stockSource(tx,String(row.source||''));if(found.product!==item.stock_product)throw Error('Product and stock category do not match.');
@@ -265,7 +306,7 @@ async function saveBill(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null){
   const hsn=gst?trimOffice(row.hsn||item.hsn,8,'HSN',true):'';if(gst&&!/^\d{4,8}$/.test(hsn))throw Error('Each GST product needs a 4–8 digit HSN.');
   lines.push({id:previous?.body.lines[lines.length]?.id||randomUUID(),product:item.id,name:item.name,quantity,unit,hsn,sku:item.sku,source,
    dispatched:v.advance===true?0:quantity,paymentReceived:v.advance!==true,
-   profit:item.approximate_profit||Math.round(unit*5/100),incentiveClass:item.incentive_class,lowIncentive:item.low_incentive});
+   profit:item.approximate_profit||Math.round(unit*5/100)});
  }
  const subtotal=lines.reduce((n,l)=>n+l.quantity*l.unit,0),discount=officePaise(v.discount||0),additional=officePaise(v.additional||0);
  const amounts=officeTax(subtotal,discount,additional,cgstRate,sgstRate,igstRate);
@@ -273,8 +314,9 @@ async function saveBill(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null){
  const advance=v.advance===true,deadline=advance?validOfficeDate(v.deadline,true):'';
  if(advance&&deadline<date)throw Error('Order deadline cannot precede bill date.');
  const number=previous?.number||await nextNumber(tx,'bill',gst,date),id=previous?.id||randomUUID();
+ const signatures=previous?.body.signatures||await signerSnapshot(tx,u,previous?.actor_id);
  const body:OfficeDocumentBody={customer,lines,layout,gst,cgstRate,sgstRate,igstRate,discount,additional,
-  notes:trimOffice(v.notes,1200,'notes'),advance,deadline,paymentMethod:trimOffice(v.method,50,'payment method'),loss:0};
+  notes:trimOffice(v.notes,1200,'notes'),advance,deadline,paymentMethod:trimOffice(v.method,50,'payment method'),loss:0,signatures};
  const delta=advance?[]:netOfficeDeltas(lines.filter(l=>l.source).map(l=>({...l.source!,quantity:-l.quantity})));
  if(previous)await revision(tx,u,previous,'before edit');
  await postStock(tx,u,id,date,number,netOfficeDeltas([...previous?.stock_delta.map(d=>({...d,quantity:-d.quantity}))||[],...delta]),previous?'office_bill_edit':'office_bill');
@@ -283,6 +325,7 @@ async function saveBill(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null){
   ON CONFLICT(id) DO UPDATE SET date=excluded.date,body=excluded.body,stock_delta=excluded.stock_delta,total=excluded.total,
   paid=excluded.paid,status=excluded.status,revision=inventory.office_documents.revision+1,updated_at=clock_timestamp()`)
   .bind(id,number,date,customer.id,u.id,gst,JSON.stringify(body),JSON.stringify(delta),amounts.total,paid,advance?'open':'settled').run();
+ await useBillApproval(tx,approval);
  await audit(tx,u,previous?'office_bill_edit':'office_bill',number,{id,total:amounts.total});return {id,number};
 }
 
@@ -316,7 +359,8 @@ async function payment(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null){
 async function returnBill(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null){
  if(!seller(u))throw reject('Selling team access required.',403);
  const previous=v.id?await document(tx,String(v.id),v.revision):null;
- if(previous&&(previous.kind!=='return'||!canSee(u,scope,previous.actor_id)))throw reject('Choose your return bill to edit.',403);
+ const approval=previous?await billChangeApproval(tx,u,previous,'edit',scope):null;
+ if(previous&&previous.kind!=='return')throw reject('Choose a return bill to edit.',403);
  const original=await document(tx,String(v.bill));if(original.kind!=='bill'||!canSee(u,scope,original.actor_id))throw reject('Choose a customer bill in your team.',403);
  if(previous&&previous.original_bill!==original.id)throw Error('Original bill cannot change on a saved return.');
  const customer=await lead(tx,original.customer),reason=String(v.reason||'') as ReturnReason;
@@ -339,6 +383,7 @@ async function returnBill(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null)
  const date=validOfficeDate(v.date),gst=original.gst,number=previous?.number||await nextNumber(tx,'return',gst,date),id=previous?.id||randomUUID();
  const body:OfficeDocumentBody={...original.body,lines:[{...line,quantity,unit,source:returnedSource,dispatched:quantity}],advance:false,deadline:'',
   notes:trimOffice(v.notes,1200,'notes'),loss,paymentMethod:cash?'Cash return':'Replacement',
+  signatures:previous?.body.signatures||await signerSnapshot(tx,u),
   replacement:replacementProduct?{product:replacementProduct.id,name:replacementProduct.name,quantity:replacementQty,unit:replacementUnit,source:replacementSource}:undefined};
  const total=-(refund-replacementQty*replacementUnit),paid=cash?-refund:0;
  if(previous)await revision(tx,u,previous,'before return edit');
@@ -348,6 +393,7 @@ async function returnBill(tx:Tx,u:InventoryUser,v:Fields,scope:Set<string>|null)
   ON CONFLICT(id) DO UPDATE SET date=excluded.date,body=excluded.body,stock_delta=excluded.stock_delta,total=excluded.total,
   paid=excluded.paid,return_reason=excluded.return_reason,revision=inventory.office_documents.revision+1,updated_at=clock_timestamp()`)
   .bind(id,number,date,customer.id,u.id,gst,JSON.stringify(body),JSON.stringify(delta),total,paid,original.id,reason).run();
+ await useBillApproval(tx,approval);
  await audit(tx,u,'office_customer_return',number,{original:original.number,loss});return {id,number};
 }
 async function salaryPayment(tx:Tx,u:InventoryUser,v:Fields,all:Employee[],actor:Employee|undefined){
@@ -357,19 +403,15 @@ async function salaryPayment(tx:Tx,u:InventoryUser,v:Fields,all:Employee[],actor
  if(end<start||!amount&&!adjust)throw Error('Check the salary period and amount.');
  const outstanding=(await tx.prepare('SELECT coalesce(sum(amount-adjusted),0)::float8 AS amount FROM inventory.office_advances WHERE employee=?::uuid').bind(employee.id).first<{amount:number}>())?.amount||0;
  if(adjust>outstanding)throw Error('Advance adjustment exceeds outstanding advances.');
- const docs=(await tx.prepare("SELECT id,kind,number,date::text,customer,actor_id,gst,body,total::float8,paid::float8,status,voided_at FROM inventory.office_documents WHERE kind='bill'").all<OfficeDocument>()).results;
- const leads=(await tx.prepare('SELECT id,created_by,created_on::text FROM inventory.office_leads').all<{id:string;created_by:string;created_on:string}>()).results;
- const savedRules=await tx.prepare('SELECT body FROM inventory.office_incentive_rules WHERE singleton').first<{body:typeof defaultIncentiveRule}>();
- const incentive=officeRewards(docs,all,leads,savedRules?.body||defaultIncentiveRule).rewards.filter(r=>r.employee===employee.id&&r.date>=start&&r.date<=end).reduce((n,r)=>n+r.amount,0);
  const cycle=await tx.prepare(`INSERT INTO inventory.office_salary_cycles(employee,period_start,period_end,salary,incentive)
-  VALUES(?::uuid,?::date,?::date,?,?) ON CONFLICT(employee,period_start,period_end) DO UPDATE SET salary=excluded.salary,incentive=excluded.incentive RETURNING id,paid::float8,advance_adjusted::float8,salary::float8,incentive::float8`)
-  .bind(employee.id,start,end,salary,incentive).first<{id:string;paid:number;advance_adjusted:number;salary:number;incentive:number}>();
- if(!cycle||cycle.paid+cycle.advance_adjusted+amount+adjust>salary+incentive)throw Error('Salary and incentive payment exceeds due.');
+  VALUES(?::uuid,?::date,?::date,?,0) ON CONFLICT(employee,period_start,period_end) DO UPDATE SET salary=excluded.salary,incentive=0 RETURNING id,paid::float8,advance_adjusted::float8,salary::float8`)
+  .bind(employee.id,start,end,salary).first<{id:string;paid:number;advance_adjusted:number;salary:number}>();
+ if(!cycle||cycle.paid+cycle.advance_adjusted+amount+adjust>salary)throw Error('Salary payment exceeds due.');
  await tx.prepare('UPDATE inventory.office_salary_cycles SET paid=paid+?,advance_adjusted=advance_adjusted+? WHERE id=?::uuid').bind(amount,adjust,cycle.id).run();
  if(amount)await tx.prepare('INSERT INTO inventory.office_salary_payments(cycle,amount,advance_adjusted,date,actor_id) VALUES(?::uuid,?,?,?::date,?)').bind(cycle.id,amount,adjust,officeDay(),u.id).run();
  if(adjust){let left=adjust;const advances=(await tx.prepare('SELECT id,amount::float8,adjusted::float8 FROM inventory.office_advances WHERE employee=?::uuid AND adjusted<amount ORDER BY date,created_at FOR UPDATE').bind(employee.id).all<{id:string;amount:number;adjusted:number}>()).results;
   for(const advance of advances){const applied=Math.min(left,advance.amount-advance.adjusted);await tx.prepare('UPDATE inventory.office_advances SET adjusted=adjusted+? WHERE id=?::uuid').bind(applied,advance.id).run();left-=applied;if(!left)break;}}
- await audit(tx,u,'office_salary_payment',employee.name,{cycle:cycle.id,amount,adjust,incentive});return {id:cycle.id};
+ await audit(tx,u,'office_salary_payment',employee.name,{cycle:cycle.id,amount,adjust});return {id:cycle.id};
 }
 
 export async function POST(request:Request){try{

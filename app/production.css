@@ -88,3 +88,4 @@
   .prod-mobile-cell-label { display: block; color: #625676; font-size: .76rem; }
   .prod-mobile-cell-label:empty { display: none; }
 }
+.phone-field{min-width:0}.phone-field>label{display:block}.phone-field-controls{display:flex;gap:8px;align-items:stretch}.prod .phone-field-controls select{width:min(60%,230px);min-width:0}.prod .phone-field-controls input{flex:1;min-width:100px}.phone-field .prod-error{display:block;margin-top:5px;padding:6px 8px;font-size:.82rem}

@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import ts from 'typescript';
+const source=await readFile(new URL('../lib/office-performance.ts',import.meta.url),'utf8');
+const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {officePerformance}=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
+const employee=[{id:'e1',user_id:'u1',joining_date:'2026-11-01',conversion_target:25,retention_target:25}];
+const leads=[{id:'l1',created_by:'u1',created_on:'2026-11-23'},{id:'l2',created_by:'u1',created_on:'2026-11-28'},{id:'l3',created_by:'u2',created_on:'2026-11-28'}];
+const bill=(id,customer,date,total,actor_id='u1')=>({id,kind:'bill',customer,date,total,actor_id,status:'settled',voided_at:null});
+const docs=[bill('b1','l1','2026-11-23',10000),bill('b2','l1','2026-11-28',20000),bill('b3','l2','2026-11-28',5000),bill('b4','l3','2026-11-28',9000,'u2'),{id:'r1',kind:'return',original_bill:'b1',customer:'l1',date:'2026-11-28',total:-2000,actor_id:'u2',voided_at:null}];
+const {kpis,targets}=officePerformance(docs,employee,leads,'2026-11-28');
+assert.deepEqual(kpis,[{employee:'e1',leadsDay:1,leadsWeek:2,leadsMonth:2,convertedCustomers:2,conversionRate:100,repeatCustomers:1,retentionRate:50,totalSales:33000,salesDay:23000,salesWeek:33000,salesMonth:33000}]);
+assert.equal(targets.at(-1).week,'2026-11-23');
+assert.equal(targets.at(-1).sales,33000);
+console.log('PASS: live employee lead, conversion, retention, return-adjusted sales and target KPIs');
