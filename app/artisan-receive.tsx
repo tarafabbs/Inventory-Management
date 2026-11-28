@@ -6,7 +6,7 @@ import { artisanPending, artisanReceiptCommand, type ArtisanReceiptDraft } from 
 import type { Snapshot } from '@/lib/production-types';
 
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-const empty = (): ArtisanReceiptDraft => ({ artisan: '', company: '', date: today(), quantities: {}, disputed: false, disputes: {}, notes: '', amount: 0, reference: '' });
+const empty = (): ArtisanReceiptDraft => ({ artisan: '', company: '', date: today(), quantities: {}, disputed: false, disputes: {}, notes: '', amount: 0, paidNow: 0, reference: '' });
 const total = (rows: { quantity: number }[]) => rows.reduce((s, b) => s + b.quantity, 0);
 
 export default function ArtisanReceive({ data, busy, save, initialArtisan='', initialCompany='' }: {
@@ -118,8 +118,8 @@ export default function ArtisanReceive({ data, busy, save, initialArtisan='', in
                             </label><small>{tr('Still with artisan before repaint:')} {b.quantity - n} {tr('pcs')}</small></div>
                         </section>;
                     })}</div>
-                    <div className="prod-fields"><label>{tr('Artisan bill / reference (optional)')}<input maxLength={200} value={draft.reference||''} onChange={e=>change({reference:e.target.value})}/></label><label>{tr('Artisan work charge (₹)')}<input type="number" min="0" step="0.01" value={draft.amount||0} onChange={e=>change({amount:Number(e.target.value)})}/></label></div>
-                    <p>{tr('Work charge adds to artisan due. Payment is separate; existing advance automatically offsets this charge. Enter zero for free rework.')}</p>
+                    <div className="prod-fields"><label>{tr('Artisan bill number (optional)')}<input maxLength={200} value={draft.reference||''} onChange={e=>change({reference:e.target.value})}/></label><label>{tr('Total artisan work charge (₹)')}<input type="number" min="0" step="0.01" value={draft.amount||0} onChange={e=>change({amount:Number(e.target.value)})}/></label><label>{tr('Paid to artisan on receipt date (₹)')}<input type="number" min="0" step="0.01" value={draft.paidNow||0} onChange={e=>change({paidNow:Number(e.target.value)})}/></label></div>
+                    <p>{tr('The work charge and payment are saved together on the selected receipt date. Unpaid work remains due; any extra payment is an advance for future work. Enter zero for free rework.')}</p>
                     <label>{tr('Remarks / Reason')}<textarea rows={2} value={draft.notes} onChange={e => change({ notes: e.target.value })}/></label>
                     <label className="prod-check"><input type="checkbox" checked={draft.disputed} onChange={e => change({ disputed: e.target.checked, disputes: {} })}/>{tr('Dispute — return part of this receipt to the same artisan for repaint')}</label>
                     {draft.disputed && <section className="receipt-dispute"><p>{tr('Disputed pieces go directly to artisan repaint and appear in Factory Disputes. They do not enter Ready to Dispatch or Company Return.')}</p>
@@ -128,7 +128,7 @@ export default function ArtisanReceive({ data, busy, save, initialArtisan='', in
                             return <label key={id}>{tr('Dispute quantity')} · {productName(b.product)} · {b.work} · {tr(b.stage === 'reprint' ? 'Internal Reprint' : 'With Artist')} ({tr('Quantity received')}: {draft.quantities[id]})<input type="number" inputMode="numeric" min="0" max={draft.quantities[id]} step="1" value={draft.disputes[id] || 0} onChange={e => change({ disputes: { ...draft.disputes, [id]: Number(e.target.value) } })}/></label>;
                         })}
                     </section>}
-                    <div className="prod-preview" aria-live="polite"><p>{tr('Quantity received')}: {received} {tr('pcs')}</p><p>{tr('Ready to Dispatch')}: {received - disputed} {tr('pcs')}</p><p>{tr('Repaint pending')}: {disputed} {tr('pcs')}</p><p>{tr('Total pending with artisan')}: {total(held) - received + disputed} {tr('pcs')}</p></div>
+                    <div className="prod-preview" aria-live="polite"><p>{tr('Quantity received')}: {received} {tr('pcs')}</p><p>{tr('Ready to Dispatch')}: {received - disputed} {tr('pcs')}</p><p>{tr('Repaint pending')}: {disputed} {tr('pcs')}</p><p>{tr('Total pending with artisan')}: {total(held) - received + disputed} {tr('pcs')}</p><p>{tr('Charge / paid now / remaining for this receipt')}: ₹{Number(draft.amount||0).toFixed(2)} / ₹{Number(draft.paidNow||0).toFixed(2)} / ₹{(Number(draft.amount||0)-Number(draft.paidNow||0)).toFixed(2)}</p></div>
                     <p>{tr('All filled quantities save together. No Add line step is needed.')}</p>
                     <button className="prod-primary" type="submit" disabled={received < 1}>{busy ? tr('Saving / Checking…') : tr('Save Receive from Artist')}</button>
                 </fieldset>

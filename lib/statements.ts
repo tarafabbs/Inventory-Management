@@ -17,7 +17,8 @@ export function statementFilter(q:URLSearchParams):StatementFilter{
 }
 export function runningLedger(entries:MoneyEntry[],opening:AmountRow[]){
  const running=new Map(opening.map(r=>[r.party,Number(r.amount)]));
- const rows=[...entries].sort((a,b)=>a.date.localeCompare(b.date)||a.created_at.localeCompare(b.created_at)||a.id.localeCompare(b.id)).map(r=>{
+ const eventOrder=(e:MoneyEntry)=>e.base_kind==='stock_correction'?0:e.base_kind==='charge'?1:e.base_kind==='payment'?2:3;
+ const rows=[...entries].sort((a,b)=>a.date.localeCompare(b.date)||a.created_at.localeCompare(b.created_at)||(a.event_id||a.id).localeCompare(b.event_id||b.id)||eventOrder(a)-eventOrder(b)||a.id.localeCompare(b.id)).map(r=>{
   const amount=Number(r.amount),before=running.get(r.party)||0,after=before+amount;
   if(!Number.isSafeInteger(amount)||!Number.isSafeInteger(after))throw Error('Statement amounts exceed the supported precise range.');
   running.set(r.party,after);return {...r,amount,before,after,increase:Math.max(0,amount),decrease:Math.max(0,-amount)};

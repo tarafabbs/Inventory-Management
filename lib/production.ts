@@ -38,6 +38,7 @@ export type Command = {
     company?: string;
     product?: string;
     amount?: number;
+    paidNow?: number;
     lines?: Line[];
     targetCompany?: string;
     document?: string;
@@ -277,11 +278,12 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
     if (c.kind === 'dispatch')
         p.money.push({ company: c.company || '', amount: paise(c.amount ?? 0), kind: 'bill' });
     if (['receive','return_receive'].includes(c.kind)) {
-        const amount=paise(c.amount??0);
-        if(amount){
+        const amount=paise(c.amount??0),paidNow=paise(c.paidNow??0);
+        if(amount||paidNow){
             const artists=new Set(lines.map(l=>l.source?.artisan).filter(Boolean));
-            if(artists.size!==1)throw new Error('Record a work charge for one artisan at a time.');
-            p.artisanMoney=[{artisan:[...artists][0]!,amount,kind:'charge'}];
+            if(artists.size!==1)throw new Error('Record work and payment for one artisan at a time.');
+            const artisan=[...artists][0]!;
+            p.artisanMoney=[...(amount?[{artisan,amount,kind:'charge'}]:[]),...(paidNow?[{artisan,amount:-paidNow,kind:'payment'}]:[])];
         }
     }
     if (c.kind === 'payment') {

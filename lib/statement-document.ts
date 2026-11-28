@@ -18,6 +18,19 @@ export function statementDocument(r:StatementReport,tr:(value:string)=>string):S
  if(artisan)artistCols.push('Artisan due','Advance remaining');
  add('artisans','Artisan pending work and accounts',artistCols,r.artisanRows.map(a=>[a.name,qty(a.companyCount),qty(a.artist),qty(a.repaint),qty(a.returnArtist),qty(a.custody),...(artisan?[money(a.due),money(a.advance)]:[])]),'Pending quantities count physical stock; work occurrences can involve the same item more than once.');
  add('stock','Stock at the statement end date',['Company','Product Category','Stock Type','Location / status','Artist','Completed:','Current work:','Quantity (pcs)'],r.stocks.filter(b=>!['delivered','raw_returned','damaged','office_sold'].includes(b.stage)).map(b=>[cname(b.company),pname(b.product),tr(b.pool==='company_return'?'Company Return':'Main Production'),tr(labels[b.stage]),b.artisan?aname(b.artisan):tr('In factory'),b.arts||tr('No completed art'),b.work||'—',qty(b.quantity)]));
+ if(artisan){
+  const openingRows=r.events.filter(e=>e.kind==='opening'||['correct','delete'].includes(e.kind)&&e.payload.correctionKind==='opening').flatMap(e=>e.delta.filter(d=>d.artisan&&['artist','reprint'].includes(d.stage)).map(d=>[date(e.event_date),aname(d.artisan),cname(d.company),pname(d.product),d.work||'—',tr(d.pool==='company_return'?'Company Return':'Main Production'),tr(e.kind==='opening'?'Opening Balance':e.kind==='correct'?'Correction':'Delete / Reverse'),`${d.quantity>0?'+':''}${qty(d.quantity)}`,e.reference||'—',e.notes||'—']));
+  add('artisan-opening-stock','Artisan opening stock entries',['Date','Artist','Company','Product Category','Current work:','Stock Type','Action','Quantity change (pcs)','Bill / reference','Remarks / Reason'],openingRows,'Opening stock records are separate from later work movements. Corrections and reversals show their quantity change.');
+ }
+ if(company){
+  const entries=r.events.filter(e=>e.kind==='receipt'||['correct','delete'].includes(e.kind)&&e.payload.correctionKind==='receipt');
+  const rows=entries.flatMap(e=>{
+   const byProduct=new Map<string,number>();
+   for(const d of e.delta.filter(d=>d.stage==='raw'&&d.pool==='normal'))byProduct.set(d.product,(byProduct.get(d.product)||0)+d.quantity);
+   return [...byProduct].map(([product,quantity])=>[date(e.event_date),cname(e.company||e.delta[0]?.company||''),pname(product),tr(e.kind==='receipt'?'New Entry':e.kind==='correct'?'Correction':'Delete / Reverse'),`${quantity>0?'+':''}${qty(quantity)}`,e.reference||'—',e.actor,e.notes||'—']);
+  });
+  add('company-entries','Company product entries by date',['Entry date','Company','Product Category','Action','Quantity change (pcs)','Bill / reference','Recorded by','Remarks / Reason'],rows,'Corrections and reversals show their quantity change. Current stock is the net of all movements.');
+ }
  const status=(b:StatementReport['stocks'][number])=>b.stage==='ready'?'Repaired / ready to dispatch':b.stage==='artist'?'Repair assigned to artisan':b.stage==='reprint'?'Repaint assigned to artisan':'Awaiting repair assignment';
  add('disputes','Dispute and repair status',['Company','Product Category','Stock Type','Repair status','Artist','Current work:','Quantity (pcs)'],r.disputes.map(b=>[cname(b.company),pname(b.product),tr(b.pool==='company_return'?'Company Return':'Factory Disputes'),tr(status(b)),b.artisan?aname(b.artisan):tr('Not assigned'),b.work||b.arts||'—',qty(b.quantity)]),'Assigned means the goods are with that artisan; a separate physical work-start confirmation is not recorded.');
  function financial(id:string,title:string,entries:RunningEntry[],period:StatementReport['companyPeriod'],names:Master[],isArtist:boolean){
@@ -27,6 +40,17 @@ export function statementDocument(r:StatementReport,tr:(value:string)=>string):S
  }
  if(company)financial('company-ledger','Company bank-style statement',r.companyLedger,r.companyPeriod,r.companies,false);
  if(artisan)financial('artisan-ledger','Artisan bank-style statement',r.artisanLedger,r.artisanPeriod,r.artisans,true);
+ if(artisan){
+  const sent=new Set(['issue','additional','reprint','return_send']),received=new Set(['receive','return_receive']);
+  const workRows=r.events.flatMap(e=>{
+   const kind=e.payload.correctionKind||e.kind;
+   if(!sent.has(kind)&&!received.has(kind))return [];
+   const lines=(e.payload.lines||[]).filter(l=>r.filter.scope!=='artisan'||(sent.has(kind)?l.artisan:l.source?.artisan)===r.filter.id);
+   const linked=r.artisanLedger.filter(m=>m.event_id===e.id);
+   return lines.map((l,i)=>[date(e.event_date),aname((sent.has(kind)?l.artisan:l.source?.artisan)||''),cname(l.source?.company||l.company||e.company||''),pname(l.source?.product||l.product||''),tr(e.kind==='correct'?'Correction · '+(actions[kind]?.label||kind):actions[kind]?.label||kind),qty(l.quantity),e.reference||'—',i===0?money(linked.filter(m=>m.base_kind==='charge').reduce((n,m)=>n+m.amount,0)):'—',i===0?money(-linked.filter(m=>m.base_kind==='payment').reduce((n,m)=>n+m.amount,0)):'—',i===0&&linked.length?money(linked.at(-1)!.after):'—',e.notes||'—']);
+  });
+  add('artisan-work','Artisan work by date, product and payment',['Date','Artist','Company','Product Category','Action','Quantity (pcs)','Job challan / artisan bill','Work charge','Paid on receipt','Account balance','Remarks / Reason'],workRows,'The account balance includes earlier advances and payments. Separate advance and later payments appear in the artisan bank-style statement. Corrections remain visible.');
+ }
  add('damage','Damage, loss and replacement obligations',['Date','Company','Product Category','Record','Quantity (pcs)','Settled / received','Pending','Recorded cost (₹)','Remarks / Reason'],r.documents.map(d=>[date(d.payload.date),cname(d.company),pname(d.payload.product||d.payload.lines?.[0]?.source?.product||''),tr(d.kind==='damage'?'Total Damage':'Replacement Order'),qty(d.quantity),qty(d.settled),qty(d.voided?0:d.quantity-d.settled),money(d.amount),(d.voided?tr('Archived by quantity reset')+' · ':'')+(d.payload.notes||'—')]),'Damage quantity is not usable stock. Replacement order cost is a recorded cost, not company due. Own-stock replacement value is not estimated.');
  const costs=r.events.filter(e=>['settle','replacement','order','order_receive'].includes(e.kind));
  add('loss-actions','Recorded loss and replacement activity',['Date','Company','Action','Quantity (pcs)','Amount / Cost (₹)','Settlement Method','Remarks / Reason'],costs.map(e=>[date(e.event_date),cname(e.company||e.payload.company||e.delta[0]?.company||''),tr(actions[e.kind]?.label||e.kind),qty(['settle','order'].includes(e.kind)?Number(e.payload.reason||0):(e.payload.lines||[]).reduce((s,l)=>s+l.quantity,0)),money(Math.round((e.payload.amount||0)*100)),tr(({cash:'Paid Separately — due unchanged',due:'Adjust from Company Due',waived:'Waived by Company'})[e.payload.settlement||'']||'—'),e.notes||'—']));

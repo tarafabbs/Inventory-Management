@@ -9,6 +9,7 @@ export type ArtisanReceiptDraft = {
     disputes: Record<string, number>;
     notes: string;
     amount?: number;
+    paidNow?: number;
     reference?: string;
 };
 
@@ -34,5 +35,5 @@ export function artisanReceiptCommand(draft: ArtisanReceiptDraft, balances: Bala
     if (!lines.length) throw new Error('Enter the quantity received for at least one category.');
     if (draft.disputed && (!lines.some(l => l.disputeQuantity > 0) || Object.entries(draft.disputes).some(([key, n]) => n !== 0 && !lines.some(l => accountKey(l.source) === key))))
         throw new Error('Dispute quantity must be a whole number within the received quantity.');
-    return { kind: 'receive', date: draft.date, company: draft.company, notes: draft.notes, amount: draft.amount || 0, reference: draft.reference || '', lines };
+    return { kind: 'receive', date: draft.date, company: draft.company, notes: draft.notes, amount: draft.amount || 0, paidNow: draft.paidNow || 0, reference: draft.reference || '', lines };
 }

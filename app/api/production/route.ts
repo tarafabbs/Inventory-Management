@@ -153,7 +153,7 @@ export async function POST(request: Request) {
                 const oldArtisanMoney=(await tx.prepare('SELECT artisan,amount::float8 AS amount,kind FROM inventory.artisan_money WHERE event_id=?::uuid').bind(old.id).all<{artisan:string;amount:number;kind:string}>()).results;
                 const artisanMoney=(old.payload.effectiveArtisanMoney||oldArtisanMoney).map(m=>({...m,amount:-m.amount,kind:'stock_correction'}));
                 if (c.kind === 'correct') {
-                    const effective = { ...old.payload, kind:old.kind, date: c.date,reference:c.reference??old.payload.reference, notes: c.notes, lines: c.lines || old.payload.lines, amount: c.amount ?? old.payload.amount };
+                    const effective = { ...old.payload, kind:old.kind, date: c.date,reference:c.reference??old.payload.reference, notes: c.notes, lines: c.lines || old.payload.lines, amount: c.amount ?? old.payload.amount, paidNow: c.paidNow ?? old.payload.paidNow };
                     p = planCommand(effective, [...map.values()], documents);
                     eventPayload = { ...effective, kind: 'correct', document: old.id, correctionKind: old.kind,effectiveDelta:p.deltas,effectiveMoney:p.money,effectiveArtisanMoney:p.artisanMoney||[],originalCreatedAt:old.payload.originalCreatedAt||old.created_at.toISOString(),originalActorId:old.payload.originalActorId||old.actor_id };
                     p.deltas = [...reversed, ...p.deltas];
