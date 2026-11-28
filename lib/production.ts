@@ -102,6 +102,7 @@ export const actions: Record<string, {
     permission: string;
 }> = {
     receipt: { label: 'New Entry', permission: 'receipt' }, issue: { label: 'Send to Artist', permission: 'handoff' }, additional: { label: 'Additional Artwork', permission: 'handoff' }, receive: { label: 'Receive from Artist', permission: 'return' },
+    reclass: { label: 'Correct Product Category', permission: 'manageData' },
     dispute: { label: 'Identify Factory Dispute', permission: 'dispute' }, reprint: { label: 'Send Internal Reprint', permission: 'reprintOut' }, damage: { label: 'Total Damage', permission: 'dispute' },
     dispatch: { label: 'Bill & Dispatch', permission: 'postFinish' }, company_return: { label: 'Receive Company Return', permission: 'postFinish' }, return_send: { label: 'Company Return · Artist Send', permission: 'reprintOut' }, return_receive: { label: 'Company Return · Artist Receive', permission: 'reprintReceive' },
     opening: { label: 'Opening Balance', permission: 'manageData' }, payment: { label: 'Company Payment', permission: 'manageData' }, replacement: { label: 'Replacement from Own Stock', permission: 'manageData' }, order: { label: 'Order from Outside', permission: 'manageData' }, order_receive: { label: 'Receive Replacement Order', permission: 'manageData' }, settle: { label: 'Damage Settlement', permission: 'manageData' },
@@ -125,6 +126,8 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
     const move = (a: Account, b: Account, n: number) => { add(a, -n); add(b, n); };
     const account = (l: Line, stage: Stage, pool: Account['pool'] = 'normal'): Account => ({ company: l.company || c.company || '', product: l.product || '', pool, stage, artisan: '', arts: '', work: '' });
     const lines = c.lines || [];
+    if(c.kind==='reclass' && (!c.company||!c.product||!c.notes?.trim()||new Set(lines.map(l=>l.source?.product)).size!==1))
+        throw new Error('Choose one company, the correct category and a reason for this stock correction.');
     const monetary = ['payment', 'settle', 'order'];
     if (!monetary.includes(c.kind) && !lines.length && !(c.kind === 'opening' && c.openingDue !== undefined))
         throw new Error('Add at least one product line.');
@@ -270,6 +273,12 @@ export function planCommand(c: Command, balances: Balance[], documents: Document
                     throw new Error('A stock correction reason is required.');
                 a = source(l, ['raw', 'ready', 'hold', 'office_stock']);
                 add(a, (l.adjustment || c.reason || 'shortage') === 'shortage' ? -n : n);
+                break;
+            case 'reclass':
+                a = source(l, ['raw', 'ready', 'hold', 'artist', 'reprint'], 'normal');
+                if(a.company!==c.company||a.product===c.product||l.product&&l.product!==c.product)
+                    throw new Error('Choose a different category for the same company and stock account.');
+                move(a,{...a,product:c.product!},n);
                 break;
             default: throw new Error('This action does not accept product lines.');
         }

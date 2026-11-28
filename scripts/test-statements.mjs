@@ -21,13 +21,16 @@ const openingEvent=evt('open-1','opening',[{...a('artist'),quantity:5}],[],'OPEN
 const receiptEvent=evt('company-1','receipt',[{...a('raw'),quantity:9}],[], 'IN-9');
 const sendEvent=evt('send-1','issue',[{...a('raw'),quantity:-3},{...a('artist'),quantity:3}],[{source:a('raw'),artisan,quantity:3}],'JOB-3');
 const receiveEvent=evt('receive-1','receive',[{...a('artist'),quantity:-2},{...a('ready'),quantity:2}],[{source:a('artist'),quantity:2}],'ART-2');
-const activitySource={...source,events:[openingEvent,receiptEvent,sendEvent,receiveEvent],artisanMoney:[{...money('z','X',-40000,date),event_id:'receive-1',reference:'ART-2'},{...money('a','X',100000,date,'charge'),event_id:'receive-1',reference:'ART-2'}]};
+const reclassEvent=evt('reclass-1','reclass',[{...a('raw'),quantity:-2},{...a('raw'),product:'tussar',quantity:2},{...a('artist'),quantity:-1},{...a('artist'),product:'tussar',quantity:1}],[{source:a('raw'),product:'tussar',quantity:2},{source:a('artist'),product:'tussar',quantity:1}],'');
+const activitySource={...source,products:[...source.products,{id:'tussar',name:'Tussar',active:1}],events:[openingEvent,receiptEvent,sendEvent,receiveEvent,reclassEvent],artisanMoney:[{...money('z','X',-40000,date),event_id:'receive-1',reference:'ART-2'},{...money('a','X',100000,date,'charge'),event_id:'receive-1',reference:'ART-2'}]};
 const activity=statementDocument(buildStatement(activitySource,{scope:'artisan',id:'X',from:'',to:date}),v=>v);
 assert.equal(activity.sections.find(s=>s.id==='artisan-opening-stock').rows[0][7],'+5');
 assert.ok(activity.sections.find(s=>s.id==='artisan-work').rows.some(r=>r[4]==='Send to Artist'&&r[6]==='JOB-3'));
 assert.ok(activity.sections.find(s=>s.id==='artisan-work').rows.some(r=>r[6]==='ART-2'&&r[8].includes('400')&&r[9].includes('400')));
+assert.ok(activity.sections.find(s=>s.id==='artisan-work').rows.some(r=>r[4]==='Category correction'&&r[3]==='Tussar'&&r[5]==='+1'));
 const companyActivity=statementDocument(buildStatement(activitySource,{scope:'company',id:'A',from:'',to:date}),v=>v);
 assert.ok(companyActivity.sections.find(s=>s.id==='company-entries').rows.some(r=>r[0]&&r[2]==='Silk'&&r[4]==='+9'&&r[5]==='IN-9'));
+assert.ok(companyActivity.sections.find(s=>s.id==='company-entries').rows.some(r=>r[2]==='Tussar'&&r[3]==='Category correction'&&r[4]==='+3'));
 assert.throws(()=>statementFilter(new URLSearchParams({from:date,to:earlier})));assert.throws(()=>statementFilter(new URLSearchParams({scope:'company'})));assert.throws(()=>statementFilter(new URLSearchParams({to:'2026-02-30'})));assert.equal(statementFilter(new URLSearchParams({scope:'artisan',id:'X',from:earlier,to:date})).id,'X');
 assert.throws(()=>buildStatement({...source,events:Array(20001).fill({})},{scope:'overall',id:'',from:'',to:date}),/no entries have been omitted/);
 console.log('PASS: atomic receipt wages; advance/payment/refund arithmetic; separate company and artisan dues; opening/running/closing balances; custody conservation; disputes; date validation; full-report limit.');

@@ -23,11 +23,11 @@ export function statementDocument(r:StatementReport,tr:(value:string)=>string):S
   add('artisan-opening-stock','Artisan opening stock entries',['Date','Artist','Company','Product Category','Current work:','Stock Type','Action','Quantity change (pcs)','Bill / reference','Remarks / Reason'],openingRows,'Opening stock records are separate from later work movements. Corrections and reversals show their quantity change.');
  }
  if(company){
-  const entries=r.events.filter(e=>e.kind==='receipt'||['correct','delete'].includes(e.kind)&&e.payload.correctionKind==='receipt');
+  const entries=r.events.filter(e=>['receipt','reclass'].includes(e.kind)||['correct','delete'].includes(e.kind)&&['receipt','reclass'].includes(e.payload.correctionKind||''));
   const rows=entries.flatMap(e=>{
    const byProduct=new Map<string,number>();
-   for(const d of e.delta.filter(d=>d.stage==='raw'&&d.pool==='normal'))byProduct.set(d.product,(byProduct.get(d.product)||0)+d.quantity);
-   return [...byProduct].map(([product,quantity])=>[date(e.event_date),cname(e.company||e.delta[0]?.company||''),pname(product),tr(e.kind==='receipt'?'New Entry':e.kind==='correct'?'Correction':'Delete / Reverse'),`${quantity>0?'+':''}${qty(quantity)}`,e.reference||'—',e.actor,e.notes||'—']);
+   for(const d of e.delta.filter(d=>d.pool==='normal'&&(e.kind==='reclass'||e.payload.correctionKind==='reclass'||d.stage==='raw')))byProduct.set(d.product,(byProduct.get(d.product)||0)+d.quantity);
+   return [...byProduct].map(([product,quantity])=>[date(e.event_date),cname(e.company||e.delta[0]?.company||''),pname(product),tr(e.kind==='receipt'?'New Entry':e.kind==='reclass'?'Category correction':e.kind==='correct'?'Correction':'Delete / Reverse'),`${quantity>0?'+':''}${qty(quantity)}`,e.reference||'—',e.actor,e.notes||'—']);
   });
   add('company-entries','Company product entries by date',['Entry date','Company','Product Category','Action','Quantity change (pcs)','Bill / reference','Recorded by','Remarks / Reason'],rows,'Corrections and reversals show their quantity change. Current stock is the net of all movements.');
  }
@@ -44,6 +44,7 @@ export function statementDocument(r:StatementReport,tr:(value:string)=>string):S
   const sent=new Set(['issue','additional','reprint','return_send']),received=new Set(['receive','return_receive']);
   const workRows=r.events.flatMap(e=>{
    const kind=e.payload.correctionKind||e.kind;
+   if(kind==='reclass')return e.delta.filter(d=>d.artisan&&d.quantity&&(r.filter.scope!=='artisan'||d.artisan===r.filter.id)).map(d=>[date(e.event_date),aname(d.artisan),cname(d.company),pname(d.product),tr(e.kind==='reclass'?'Category correction':e.kind==='correct'?'Correction':'Delete / Reverse'),`${d.quantity>0?'+':''}${qty(d.quantity)}`,e.reference||'—','—','—','—',e.notes||'—']);
    if(!sent.has(kind)&&!received.has(kind))return [];
    const lines=(e.payload.lines||[]).filter(l=>r.filter.scope!=='artisan'||(sent.has(kind)?l.artisan:l.source?.artisan)===r.filter.id);
    const linked=r.artisanLedger.filter(m=>m.event_id===e.id);

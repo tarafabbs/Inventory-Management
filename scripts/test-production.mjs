@@ -27,4 +27,13 @@ post('damage',[line(acct('raw'),5)],{notes:'Replacement needed'});post('order',[
 post('opening',[line(acct('artist','','X','R','normal','B'),15)],{confirm:true});assert.equal(q(acct('artist','','X','R','normal','B')),15);post('opening',[],{company:'B',confirm:true,openingDue:-200});assert.equal(due,280000);
 for(const quantity of [0,-1,1.5,1000001])fails(()=>post('receipt',[{company:'A',product:'silk',quantity}]));fails(()=>paise(10.001));assert.equal(normalizeArts('S + R + R'),'R + S');
 fails(()=>post('return_send',[line(acct('ready','R'),1,{artisan:'X',artwork:'R'})]));fails(()=>post('reprint',[line(acct('hold','R + T','','','company_return'),1,{artisan:'X',artwork:'R'})]));
+const totalBeforeReclass=balances.reduce((s,b)=>s+b.quantity,0),rawBeforeReclass=q(acct('raw')),artistBeforeReclass=q(acct('artist','','X','R'));
+const reclass=post('reclass',[line(acct('raw'),7),line(acct('artist','','X','R'),5)],{company:'A',product:'tussar',notes:'Wrong category at entry'});
+assert.deepEqual(reclass.money,[]);assert.equal(q(acct('raw')),rawBeforeReclass-7);assert.equal(q({...acct('raw'),product:'tussar'}),7);
+assert.equal(q(acct('artist','','X','R')),artistBeforeReclass-5);assert.equal(q({...acct('artist','','X','R'),product:'tussar'}),5);
+assert.equal(balances.reduce((s,b)=>s+b.quantity,0),totalBeforeReclass,'Category correction must conserve stock in every location');
+fails(()=>post('reclass',[line(acct('raw'),1)],{company:'A',product:'silk',notes:'Same category'}));
+fails(()=>post('reclass',[line(acct('raw'),1)],{company:'A',product:'tussar'}));
+fails(()=>post('reclass',[line(acct('raw'),rawBeforeReclass)],{company:'A',product:'tussar',notes:'Too many'}));
+fails(()=>post('reclass',[line(acct('delivered'),1)],{company:'A',product:'tussar',notes:'Not in custody'}));
 console.log(`Production business scenarios passed: ${checks} postings / rejection checks.`);

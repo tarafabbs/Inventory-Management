@@ -125,7 +125,7 @@ export async function POST(request: Request) {
                 if (await tx.prepare("SELECT id FROM inventory.production_events WHERE payload->>'document'=? AND kind IN ('correct','delete')").bind(old.id).first())
                     throw reject('This entry is already corrected.');
                 old.kind=old.payload.correctionKind||old.kind;
-                if (!['office_vendor','issue', 'additional', 'reprint', 'return_send', 'receipt', 'receive', 'return_receive', 'dispute', 'company_return', 'payment', 'dispatch', 'opening', 'stock_count'].includes(old.kind))
+                if (!['office_vendor','issue', 'additional', 'reprint', 'return_send', 'receipt', 'receive', 'return_receive', 'dispute', 'company_return', 'payment', 'dispatch', 'opening', 'stock_count', 'reclass'].includes(old.kind))
                     throw reject('Linked settlement records require a supervised adjustment.');
                 if (c.kind === 'correct') {
                     if(old.kind==='office_vendor'&&!isManagement(u.role)){if(!permitted(u.role,'officeEdit')||Date.now()-new Date(old.payload.originalCreatedAt||old.created_at).getTime()>864e5||JSON.stringify(c.lines||old.payload.lines)!==JSON.stringify(old.payload.lines))throw reject('Office receipt detail edits are limited to 24 hours; quantities stay unchanged.',403);}
