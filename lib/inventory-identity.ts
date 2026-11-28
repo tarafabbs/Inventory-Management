@@ -27,3 +27,12 @@ export async function inventorySession() {
   const staff = oauth && data?.claims.sub === user.id ? await inventoryUser(user) : null;
   return {signedIn: true, staff: staff?.active ? staff : null};
 }
+
+// An Office profile adds access to the same Google login without replacing its
+// Workshop Staff Access role. The profile's role governs Office requests only.
+export async function officeUser(staff: InventoryUser) {
+  if (['Admin', 'Management'].includes(staff.role)) return staff;
+  const profile = await db.prepare('SELECT role FROM inventory.office_employees WHERE user_id=? AND active=true')
+    .bind(staff.id).first<{role:string}>();
+  return profile ? {...staff, role:profile.role} : staff;
+}

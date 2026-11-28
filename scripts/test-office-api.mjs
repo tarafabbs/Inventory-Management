@@ -18,7 +18,7 @@ try{await sql.begin(async tx=>{
  globalThis.__db=wrapper(tx);
  let route=await source('../app/api/office/route.ts');
  route=route.replace("import {db} from '@/lib/database';",'const db=globalThis.__db;')
-  .replace("import {inventorySession,type InventoryUser} from '@/lib/inventory-identity';",'const inventorySession=async()=>globalThis.__identity;')
+  .replace("import {inventorySession,officeUser,type InventoryUser} from '@/lib/inventory-identity';",'const inventorySession=async()=>globalThis.__identity;const officeUser=async staff=>{if(["Admin","Management"].includes(staff.role))return staff;const profile=await globalThis.__db.prepare("SELECT role FROM inventory.office_employees WHERE user_id=? AND active=true").bind(staff.id).first();return profile?{...staff,role:profile.role}:staff;};')
   .replace("import {accountKey,type Account,type Delta} from '@/lib/production';",'const {accountKey}=globalThis.__prod;')
   .replace("import {isOwner,roleLabel} from '@/lib/rules';",'const {isOwner,roleLabel}=globalThis.__rules;')
   .replace(/import \{defaultIncentiveRule,[^;]+\} from '@\/lib\/office-core';/,'const {defaultIncentiveRule,netOfficeDeltas,officeDay,officeFYear,officeNumber,officePaise,officeQuantity,officeReturnLoss,officeRoles,officeTax,returnReasons,sellingRoles,trimOffice,validOfficeDate}=globalThis.__core;')
@@ -55,6 +55,14 @@ try{await sql.begin(async tx=>{
  await tx`insert into inventory.users(id,name,email,role,active,created_at) values(${roleUser.id},${roleUser.name},${roleUser.email},${roleUser.role},1,${new Date().toISOString()})`;
  const manager=(await send({op:'employee',role:'Office Manager',name:'Office test manager',email:'manager-'+randomUUID()+'@example.test',joiningDate:date,salary:2000})).id;
  const staff=(await send({op:'employee',role:'Office Staff',name:roleUser.name,email:roleUser.email,joiningDate:date,salary:1000,managerId:manager,conversionTarget:20,retentionTarget:20})).id;
+ const workshopUser={id:randomUUID(),name:'Workshop and Office tester',role:'Supervisor',email:'both-'+randomUUID()+'@example.test'};
+ await tx`insert into inventory.users(id,name,email,role,active,created_at) values(${workshopUser.id},${workshopUser.name},${workshopUser.email},${workshopUser.role},1,${new Date().toISOString()})`;
+ const dualProfile=(await send({op:'employee',role:'Office Staff',name:workshopUser.name,email:workshopUser.email,joiningDate:date,managerId:manager})).id;
+ const [dualRow]=await tx`select u.role as workshop_role,e.role as office_role from inventory.users u join inventory.office_employees e on e.user_id=u.id where e.id=${dualProfile}`;
+ assert.deepEqual([dualRow.workshop_role,dualRow.office_role],['Supervisor','Office Staff']);
+ globalThis.__identity={signedIn:true,staff:workshopUser};
+ assert.equal((await get()).user.role,'Office Staff');
+ globalThis.__identity={signedIn:true,staff:owner};
  const staffRow=(await tx`select employee_code,manager_id,conversion_target,retention_target from inventory.office_employees where id=${staff}`)[0];assert.match(staffRow.employee_code,/^TF-\d{5}$/);assert.equal(staffRow.manager_id,manager);assert.deepEqual([staffRow.conversion_target,staffRow.retention_target],[0,0]);
  const assistant=(await send({op:'employee',role:'Assistant Manager',name:'Office test assistant',email:'assistant-'+randomUUID()+'@example.test',joiningDate:date,managerId:manager})).id;
  const otherManager=(await send({op:'employee',role:'Office Manager',name:'Other office manager',email:'other-manager-'+randomUUID()+'@example.test',joiningDate:date})).id;

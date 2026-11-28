@@ -1,6 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {db} from '@/lib/database';
-import {inventorySession,type InventoryUser} from '@/lib/inventory-identity';
+import {inventorySession,officeUser,type InventoryUser} from '@/lib/inventory-identity';
 import {accountKey,type Account,type Delta} from '@/lib/production';
 import {isOwner,roleLabel} from '@/lib/rules';
 import {defaultIncentiveRule,netOfficeDeltas,officeDay,officeFYear,officeNumber,officePaise,officeQuantity,officeReturnLoss,officeRoles,officeTax,returnReasons,sellingRoles,trimOffice,validOfficeDate,type OfficeDocument,type OfficeDocumentBody,type OfficeLine,type ReturnReason} from '@/lib/office-core';
@@ -15,7 +15,7 @@ type Employee={id:string;user_id:string|null;email:string;employee_code:string;r
 type Product={id:string;name:string;stock_product:string|null;price:number;hsn:string;sku:string;approximate_profit:number;incentive_class:'normal'|'low'|'excluded';low_incentive:number;active:boolean};
 type Lead={id:string;name:string;business_name:string;phone:string;whatsapp:string;address:string;gst:string;created_by:string;created_on:string;follow_up_date:string|null;notes:string;verified_at:string|null;purchases:number;average_monthly:number};
 
-async function user(){const s=await inventorySession();if(!s.signedIn||!s.staff||!officeRoles.includes(s.staff.role))throw reject('Office access required.',403);return s.staff;}
+async function user(){const s=await inventorySession();if(!s.signedIn||!s.staff)throw reject('Office access required.',403);const u=await officeUser(s.staff);if(!officeRoles.includes(u.role))throw reject('Office access required.',403);return u;}
 const management=(u:InventoryUser)=>['Admin','Management','Office Manager'].includes(u.role);
 const seller=(u:InventoryUser)=>sellingRoles.includes(u.role);
 const profile=(u:InventoryUser,employees:Employee[])=>employees.find(e=>e.user_id===u.id);
@@ -175,7 +175,6 @@ async function mutate(tx:Tx,u:InventoryUser,v:Fields){
    if(role==='Assistant Manager'&&boss&&all.find(e=>e.id===boss)?.role!=='Office Manager')throw Error('Assistant Manager must report to a Manager.');
    if(u.role==='Office Manager'&&boss!==actor?.id&&!(role==='Office Staff'&&manager?.role==='Assistant Manager'&&manager.manager_id===actor?.id))throw reject('Choose yourself or an Assistant Manager in your team.',403);
    const existingUser=await tx.prepare('SELECT id,role FROM users WHERE lower(email)=?').bind(email).first<{id:string;role:string}>();
-   if(existingUser&&existingUser.role!==role)throw Error('This Google email already has another role in Staff Access.');
    if(old&&existingUser&&existingUser.id!==old.user_id)throw Error('This email belongs to a different employee profile.');
    if(old&&!existingUser)throw Error('Change employee login email in Staff Access before editing this profile.');
    if(!old&&existingUser&&all.some(e=>e.user_id===existingUser.id))throw Error('This Google email already has an Office profile.');
@@ -380,7 +379,8 @@ export async function POST(request:Request){try{
  const fingerprint=createHash('sha256').update(raw).digest('hex');
  const result=await db.transaction(async tx=>{
   await tx.prepare("SELECT pg_advisory_xact_lock(hashtextextended('production-posting',0))").run();
-  if(!await tx.prepare('SELECT id FROM users WHERE id=? AND role=? AND active=1 FOR SHARE').bind(u.id,u.role).first())throw reject('Your access changed.',403);
+  if(!await tx.prepare('SELECT id FROM users WHERE id=? AND active=1 FOR SHARE').bind(u.id).first())throw reject('Your access changed.',403);
+  if(!isOwner(u.role)&&u.role!=='Management'&&!await tx.prepare('SELECT id FROM users WHERE id=? AND role=? UNION ALL SELECT user_id AS id FROM inventory.office_employees WHERE user_id=? AND role=? AND active=true LIMIT 1').bind(u.id,u.role,u.id,u.role).first())throw reject('Your Office access changed.',403);
   const prior=await tx.prepare('SELECT fingerprint,actor_id,result FROM inventory.production_requests WHERE id=?').bind(key).first<{fingerprint:string;actor_id:string;result:unknown}>();
   if(prior){if(prior.fingerprint!==fingerprint||prior.actor_id!==u.id)throw reject('This request belongs to another entry.',409);return prior.result;}
   const {key:_,...values}=input;

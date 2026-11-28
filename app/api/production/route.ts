@@ -1,19 +1,21 @@
 import {productionSnapshot} from '@/lib/production-snapshot';
 import { createHash, randomUUID } from 'node:crypto';
 import { db } from '@/lib/database';
-import { inventorySession } from '@/lib/inventory-identity';
+import { inventorySession, officeUser } from '@/lib/inventory-identity';
 import { isManagement, isOfficeRole, isOwner, permitted, roleLabel } from '@/lib/rules';
 import { actions, accountKey, planCommand, type Balance, type Command, type Document, type Delta } from '@/lib/production';
 export const dynamic = 'force-dynamic';
 const reply = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
 const reject = (s: string, status = 400) => Object.assign(new Error(s), { status });
-async function user() { const s = await inventorySession(); if (!s.staff || !s.signedIn || !permitted(s.staff.role, 'read'))
-    throw reject('Sign in with an approved Google account.', 403); return s.staff; }
+async function user(officeView = false) { const s = await inventorySession(); if (!s.staff || !s.signedIn)
+    throw reject('Sign in with an approved Google account.', 403); const u=officeView?await officeUser(s.staff):s.staff;
+    if(!permitted(u.role,'read')||(officeView&&!isManagement(u.role)&&!['Office Staff','Assistant Manager','Office Manager','Production Manager'].includes(u.role)))
+    throw reject('Office access required.',403); return u; }
 const officeKinds = new Set(['office_receive', 'office_sell', 'office_return', 'office_vendor', 'vendor_return','correct']);
 export async function GET(request: Request) {
     try {
-        const u = await user();
         const q = new URL(request.url).searchParams;
+        const u = await user(q.get('view') === 'office');
         const page = Math.max(0, Math.min(10000, Number(q.get('page')) || 0));
         const company = q.get('company') || '';
         const office = isOfficeRole(u.role) || u.role==='Production Manager' || (isManagement(u.role) && q.get('view') === 'office');
@@ -30,7 +32,8 @@ export async function POST(request: Request) {
     try {
         if (request.headers.get('origin') && request.headers.get('origin') !== new URL(request.url).origin)
             throw reject('Use the inventory site.', 403);
-        const u = await user();
+        const officeView=new URL(request.url).searchParams.get('view')==='office';
+        const u = await user(officeView);
         const body = await request.json();
         const { key, ...raw } = body;
         const c = raw as Command;
@@ -49,8 +52,12 @@ export async function POST(request: Request) {
         const hash = createHash('sha256').update(JSON.stringify(c)).digest('hex');
         const result = await db.transaction(async (tx) => {
             await tx.prepare("SELECT pg_advisory_xact_lock(hashtextextended('production-posting',0))").run();
-            if (!await tx.prepare('SELECT id FROM users WHERE id=? AND active=1 AND role=? FOR SHARE').bind(u.id, u.role).first())
+            if (!await tx.prepare('SELECT id FROM users WHERE id=? AND active=1 FOR SHARE').bind(u.id).first())
                 throw reject('Your access changed.', 403);
+            if (!officeView&&!await tx.prepare('SELECT id FROM users WHERE id=? AND role=?').bind(u.id,u.role).first())
+                throw reject('Your access changed.',403);
+            if (officeView&&!isManagement(u.role)&&!await tx.prepare('SELECT id FROM users WHERE id=? AND role=? UNION ALL SELECT user_id AS id FROM inventory.office_employees WHERE user_id=? AND role=? AND active=true LIMIT 1').bind(u.id,u.role,u.id,u.role).first())
+                throw reject('Your Office access changed.',403);
             const previous = await tx.prepare('SELECT fingerprint,result,actor_id FROM inventory.production_requests WHERE id=?').bind(key).first<{
                 fingerprint: string;
                 result: unknown;

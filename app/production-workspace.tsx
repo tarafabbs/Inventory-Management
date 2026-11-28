@@ -26,8 +26,9 @@ async function json(url:string,init?:RequestInit) {
     }
 }
 const post = (url: string, body: unknown) => json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-export default function ProductionWorkspace({ office = false,initialData,initialError='',initialAction='' }: {
+export default function ProductionWorkspace({ office = false,officeAccess=false,initialData,initialError='',initialAction='' }: {
     office?: boolean;
+    officeAccess?:boolean;
     initialData?:Snapshot;
     initialError?:string;
     initialAction?:string;
@@ -95,8 +96,8 @@ export default function ProductionWorkspace({ office = false,initialData,initial
     const titles: Record<string, string> = { home: 'Home', statements: 'Reports & Statements', performance: 'Performance', companies: 'Companies', 'own-products':'TaraFabbs Own Product', artists: 'Artisans', 'company-return': 'Company Return', dispatch: 'Dispatch Done', 'factory-disputes': 'Factory Disputes', history: 'History', opening: 'Opening Balance', 'stock-check': 'Stock Check', access: 'Staff Access', 'data-control': 'Owner Data Control' };
     const companyData = data.companies.find(c => c.id === company);
     const matchesProfile=(p:Master)=>profilesView==='all'||(profilesView==='current'?['active','paused'].includes(profileStatus(p)):profileStatus(p)===profilesView);
-    return <div className={isManagement(data.user.role) ? 'prod prod-with-inventory-switch' : 'prod'}>
- {isManagement(data.user.role) && <nav className="prod-inventory-switch" aria-label={tr('Inventory')}>
+    return <div className={officeAccess ? 'prod prod-with-inventory-switch' : 'prod'}>
+ {officeAccess && <nav className="prod-inventory-switch" aria-label={tr('Inventory')}>
   <span>{tr('Inventory')}</span>
   <div role="group" aria-label={tr('Inventory')}>
    <a href="/" aria-current={!office ? 'page' : undefined}>{tr('Workshop Inventory')}</a>
